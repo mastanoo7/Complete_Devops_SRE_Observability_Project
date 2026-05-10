@@ -80,12 +80,12 @@ wget https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 
-# Install Java 21 (Temurin)
+# Install Java 17 (Temurin)
 sudo apt install -y wget apt-transport-https
 wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo apt-key add -
 echo "deb https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" \
   | sudo tee /etc/apt/sources.list.d/adoptium.list
-sudo apt update && sudo apt install -y temurin-21-jdk
+sudo apt update && sudo apt install -y temurin-17-jdk
 
 # Install Maven
 sudo apt install -y maven
@@ -162,6 +162,9 @@ cd nexacommerce
 # Copy environment template
 cp .env.example .env.local
 
+# Optional: also create .env for docker compose variable loading
+cp .env.example .env
+
 # Edit with your values
 nano .env.local
 ```
@@ -185,10 +188,10 @@ docker compose up -d frontend
 docker compose ps
 
 # Check service health
-curl http://localhost:3000/health        # Frontend
-curl http://localhost:8080/health        # API Gateway
-curl http://localhost:8081/health        # Auth Service
-curl http://localhost:8082/health        # Product Service
+curl http://localhost:3000               # Frontend
+curl http://localhost:8080/health/live   # API Gateway
+curl http://localhost:8081/health/live   # Auth Service
+curl http://localhost:8082/actuator/health # Product Service
 ```
 
 ### Access Local Services
@@ -199,9 +202,9 @@ curl http://localhost:8082/health        # Product Service
 | API Gateway | http://localhost:8080 |
 | Grafana | http://localhost:3001 (admin/admin) |
 | Prometheus | http://localhost:9090 |
-| Kibana | http://localhost:5601 |
+| Loki (API) | http://localhost:3100 |
 | Kafka UI | http://localhost:8090 |
-| ArgoCD | http://localhost:8888 |
+| MailHog | http://localhost:8025 |
 
 ---
 
@@ -213,13 +216,13 @@ curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64
 chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
 
 # Create local cluster
-kind create cluster --config scripts/kind/kind-config.yaml --name nexacommerce-local
+kind create cluster --name nexacommerce-local
 
 # Load local images
 kind load docker-image nexacommerce/auth-service:local --name nexacommerce-local
 
-# Deploy to local cluster
-kubectl apply -k kubernetes/overlays/local
+# Deploy dev overlay to local cluster (adjust as needed)
+kubectl apply -k kubernetes/overlays/dev
 
 # Access via port-forward
 kubectl port-forward svc/frontend 3000:80 -n nexacommerce-local

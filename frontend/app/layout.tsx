@@ -13,6 +13,7 @@ export const metadata: Metadata = {
   title: 'NexaCommerce — Enterprise Ecommerce Platform',
   description: 'Shop millions of products with fast delivery',
   keywords: ['ecommerce', 'shopping', 'nexacommerce'],
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'),
   openGraph: {
     title: 'NexaCommerce',
     description: 'Enterprise Ecommerce Platform',

@@ -1,0 +1,58 @@
+# ============================================================
+# Prometheus — Local Development Configuration (Docker Compose)
+# ============================================================
+
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+rule_files:
+  - /etc/prometheus/rules/recording-rules.yaml
+  - /etc/prometheus/rules/service-alerts.yaml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Local docker-compose services
+  - job_name: api-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api-gateway:8080"]
+
+  - job_name: auth-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["auth-service:8081"]
+
+  - job_name: product-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["product-service:8082"]
+
+  - job_name: cart-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["cart-service:8083"]
+
+  - job_name: order-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["order-service:8084"]
+
+  - job_name: payment-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["payment-service:8085"]
+
+  - job_name: inventory-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["inventory-service:8086"]
+
+  - job_name: notification-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notification-service:8087"]
+

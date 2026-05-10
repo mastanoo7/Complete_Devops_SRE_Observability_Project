@@ -5,6 +5,7 @@
 // ============================================================
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { useState } from 'react'
 
 interface CartItemData {
@@ -26,9 +27,11 @@ function CartItemRow({
 }) {
   return (
     <div className="flex items-center gap-4 py-4 border-b border-gray-200">
-      <img
+      <Image
         src={item.image}
         alt={item.name}
+        width={80}
+        height={80}
         className="h-20 w-20 rounded-lg object-cover bg-gray-100"
       />
       <div className="flex-1">

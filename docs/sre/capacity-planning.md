@@ -169,6 +169,6 @@ kube_horizontalpodautoscaler_status_current_replicas{namespace="nexacommerce-pro
 
 ## Related Documents
 - [SLIs/SLOs/SLAs](../sre/slis-slos-slas.md)
-- [AWS Architecture](aws-architecture.md)
-- [Kubernetes Architecture](kubernetes-architecture.md)
+- [AWS Architecture](../architecture/aws-architecture.md)
+- [Kubernetes Architecture](../architecture/kubernetes-architecture.md)
 - [Grafana Capacity Dashboard](https://grafana.nexacommerce.com/d/capacity)

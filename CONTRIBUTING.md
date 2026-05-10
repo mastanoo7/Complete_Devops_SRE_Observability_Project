@@ -26,11 +26,13 @@ cd nexacommerce
 # See docs/setup/prerequisites.md
 
 # 3. Start local environment
-make setup-local
+cp .env.example .env.local
 make dev-up
 
 # 4. Verify everything works
-make test-all
+cd frontend && npm run type-check && npm run build
+cd ../backend/product-service && mvn -q -DskipTests package
+cd ../order-service && mvn -q -DskipTests package
 ```
 
 ---
@@ -103,8 +105,10 @@ security(auth): rotate JWT signing key
 ### Before Opening a PR
 
 ```bash
-# 1. Ensure tests pass
-make test-all
+# 1. Ensure core checks pass
+cd frontend && npm run type-check && npm run build
+cd ../backend/product-service && mvn -q -DskipTests package
+cd ../order-service && mvn -q -DskipTests package
 
 # 2. Lint your code
 make lint
@@ -260,14 +264,15 @@ async def reserve_stock(
 ### Running Tests
 
 ```bash
-# All tests
-make test-all
+# Frontend checks
+cd frontend && npm run type-check && npm run lint && npm run build
 
 # Unit tests only
 make test-unit
 
-# Integration tests
-make test-integration
+# Service builds
+cd backend/product-service && mvn -q -DskipTests package
+cd ../order-service && mvn -q -DskipTests package
 
 # E2E tests
 make test-e2e

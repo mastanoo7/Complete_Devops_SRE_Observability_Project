@@ -138,10 +138,10 @@ on:
 ---
 
 ## Related Files
-- [Backend CI](.github/workflows/backend-ci.yml)
-- [Frontend CI](.github/workflows/frontend-ci.yml)
-- [Security Scan](.github/workflows/security-scan.yml)
-- [Terraform CI](.github/workflows/terraform-ci.yml)
-- [Deploy DEV](.github/workflows/deployment-dev.yml)
-- [Deploy Staging](.github/workflows/deployment-staging.yml)
-- [Deploy Prod](.github/workflows/deployment-prod.yml)
+- [Backend CI](../../.github/workflows/backend-ci.yml)
+- [Frontend CI](../../.github/workflows/frontend-ci.yml)
+- [Security Scan](../../.github/workflows/security-scan.yml)
+- [Terraform CI](../../.github/workflows/terraform-ci.yml)
+- [Deploy DEV](../../.github/workflows/deployment-dev.yml)
+- [Deploy Staging](../../.github/workflows/deployment-staging.yml)
+- [Deploy Prod](../../.github/workflows/deployment-prod.yml)

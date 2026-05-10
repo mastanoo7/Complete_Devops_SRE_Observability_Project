@@ -16,6 +16,9 @@ resources:
   # Auth Service
   - auth-service/deployment.yaml
 
+  # API Gateway
+  - api-gateway/deployment.yaml
+
   # Product Service
   - product-service/deployment.yaml
 

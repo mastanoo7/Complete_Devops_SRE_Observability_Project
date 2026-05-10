@@ -31,6 +31,9 @@ This document lists all tools required to work with the NexaCommerce platform ac
 | VS Code | Latest | [code.visualstudio.com](https://code.visualstudio.com) |
 | Node.js | 20 LTS | [nodejs.org](https://nodejs.org) |
 | Python | 3.11+ | [python.org](https://python.org) |
+| Java (JDK) | 17 LTS | [adoptium.net](https://adoptium.net/) |
+| Maven | 3.9+ | [maven.apache.org](https://maven.apache.org/) |
+| Go | 1.22+ | [go.dev](https://go.dev/) |
 
 ### 🏗️ DevOps / Platform Engineers
 
@@ -135,3 +138,5 @@ Store secrets in `.env.local` (gitignored) or use [direnv](https://direnv.net/).
 - [Docker Setup](docker-setup.md)
 - [Kubernetes Setup](kubernetes-setup.md)
 - [AWS Setup](aws-setup.md)
+- [Azure Setup](azure-setup.md)
+- [GCP Setup](gcp-setup.md)

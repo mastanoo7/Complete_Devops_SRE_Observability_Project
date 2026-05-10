@@ -161,6 +161,7 @@ services:
       CART_SERVICE_URL: http://cart-service:8083
       ORDER_SERVICE_URL: http://order-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
+      SEARCH_SERVICE_URL: http://search-service:8088
       REDIS_URL: redis://:${REDIS_PASSWORD:-localdev123}@redis:6379
     ports:
       - "8080:8080"
@@ -308,6 +309,23 @@ services:
       - "8087:8087"
     networks: [backend-net, data-net]
     depends_on: [mongodb, kafka]
+
+  search-service:
+    build:
+      context: ./backend/search-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-search
+    environment:
+      PORT: 8088
+      INDEX_PRODUCTS: nexacommerce-products
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "8088:8088"
+    networks: [backend-net, data-net]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
 
   frontend:
     build:

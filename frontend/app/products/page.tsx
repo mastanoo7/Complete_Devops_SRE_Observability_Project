@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Metadata } from 'next'
+import Image from 'next/image'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
@@ -28,9 +29,11 @@ function ProductCard({ product }: { product: {
   return (
     <div className="card group hover:shadow-lg transition-shadow">
       <div className="aspect-square overflow-hidden rounded-t-lg bg-gray-100">
-        <img
+        <Image
           src={product.image}
           alt={product.name}
+          width={400}
+          height={400}
           className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
       </div>

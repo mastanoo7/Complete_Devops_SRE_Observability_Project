@@ -12,7 +12,7 @@ WORKDIR /app
 RUN apk add --no-cache git ca-certificates tzdata
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # Copy source
@@ -34,7 +34,7 @@ RUN apk add --no-cache git
 # Install air for hot reload
 RUN go install github.com/cosmtrek/air@latest
 
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 COPY . .

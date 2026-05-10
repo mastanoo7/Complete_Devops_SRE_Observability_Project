@@ -29,7 +29,7 @@
 
 NexaCommerce is a **FAANG-scale, enterprise-grade ecommerce platform** built with:
 
-- **13 microservices** (frontend, auth, catalog, cart, orders, payments, inventory, search, recommendations, notifications, API gateway, admin)
+- **9 local services currently wired** (frontend, api-gateway, auth, product, cart, order, payment, inventory, notification)
 - **Multi-cloud active-active** deployment across AWS, Azure, and GCP
 - **3 environments**: DEV → STAGING → PRODUCTION
 - **Full GitOps** with ArgoCD
@@ -65,17 +65,8 @@ Observability (Prometheus + Grafana + Loki + Jaeger)
 git clone https://github.com/your-org/nexacommerce.git
 cd nexacommerce
 
-# Setup local development environment
-make setup-local
-
 # Start all services locally
 make dev-up
-
-# Deploy to DEV environment
-make deploy-dev
-
-# Run full test suite
-make test-all
 ```
 
 📖 **Detailed setup**: [docs/setup/local-development.md](docs/setup/local-development.md)
@@ -95,11 +86,7 @@ nexacommerce/
 │   ├── order-service/
 │   ├── payment-service/
 │   ├── inventory-service/
-│   ├── search-service/
-│   ├── recommendation-service/
-│   ├── notification-service/
-│   └── admin-service/
-├── infrastructure/              # Cloud infrastructure configs
+│   └── notification-service/
 ├── terraform/                   # IaC — modular Terraform
 │   ├── modules/                 # Reusable modules
 │   └── environments/            # Per-environment configs
@@ -115,7 +102,6 @@ nexacommerce/
 ├── docs/                        # All documentation
 ├── runbooks/                    # Operational runbooks
 ├── chaos-engineering/           # Chaos experiments
-├── sre/                         # SRE configs and policies
 ├── .github/                     # GitHub Actions workflows
 ├── Jenkinsfile                  # Jenkins pipeline
 └── Makefile                     # Developer shortcuts
@@ -144,7 +130,7 @@ nexacommerce/
 |----------|-------------|
 | [Prerequisites](docs/setup/prerequisites.md) | Required tools & accounts |
 | [Local Development](docs/setup/local-development.md) | Local dev environment |
-| [Docker Setup](docs/setup/docker-setup.md) | Docker configuration |
+| [Docker Setup](docs/setup/docker-setup.md) | Docker/Compose local workflow |
 | [Kubernetes Setup](docs/setup/kubernetes-setup.md) | K8s cluster setup |
 | [Terraform Setup](docs/setup/terraform-setup.md) | IaC setup |
 | [AWS Setup](docs/setup/aws-setup.md) | AWS environment |
