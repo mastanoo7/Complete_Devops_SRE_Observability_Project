@@ -6,22 +6,20 @@
 # Builder Stage
 # ============================================================
 
-FROM golang:1.22-alpine AS builder
+FROM golang:1.22 AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache \
-    git \
-    ca-certificates \
-    tzdata \
-    build-base
-
+# Copy source code
 COPY . .
 
+# Download dependencies
 RUN go mod tidy
 
+# Optional version
 ARG GIT_COMMIT=local
 
+# Build binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.version=${GIT_COMMIT}" \
     -o auth-service \
@@ -32,21 +30,20 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Development Stage
 # ============================================================
 
-FROM golang:1.22-alpine AS development
+FROM golang:1.22 AS development
 
 WORKDIR /app
 
-RUN apk add --no-cache \
-    git \
-    ca-certificates \
-    build-base
-
+# Copy source code
 COPY . .
 
+# Download dependencies
 RUN go mod tidy
 
+# Expose ports
 EXPOSE 8081 9090
 
+# Run application
 CMD ["go", "run", "main.go"]
 
 
@@ -54,18 +51,15 @@ CMD ["go", "run", "main.go"]
 # Production Stage
 # ============================================================
 
-FROM gcr.io/distroless/static-debian12:nonroot AS production
+FROM debian:bookworm-slim AS production
 
 WORKDIR /app
 
+# Copy binary
 COPY --from=builder /app/auth-service /app/auth-service
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-
-USER nonroot:nonroot
-
+# Expose ports
 EXPOSE 8081 9090
 
-ENTRYPOINT ["/app/auth-service"]
+# Run application
+CMD ["/app/auth-service"]
