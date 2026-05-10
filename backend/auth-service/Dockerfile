@@ -38,20 +38,16 @@ WORKDIR /app
 
 RUN apk add --no-cache \
     git \
-    build-base \
-    curl
+    ca-certificates \
+    build-base
 
 COPY . .
 
 RUN go mod tidy
 
-RUN go install github.com/air-verse/air@v1.61.1
-
-ENV PATH="/go/bin:${PATH}"
-
 EXPOSE 8081 9090
 
-CMD ["air", "-c", ".air.toml"]
+CMD ["go", "run", "main.go"]
 
 
 # ============================================================
