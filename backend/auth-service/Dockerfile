@@ -1,17 +1,68 @@
 # ============================================================
 # Auth Service — Dockerfile
-# Multi-stage build for Go service
+# Multi-stage Dockerfile for Go Auth Service
+# Supports:
+#   - Builder stage
+#   - Development stage with hot reload (Air)
+#   - Production distroless image
 # ============================================================
 
-# ── Build Stage ───────────────────────────────────────────
+# ============================================================
+# ── Builder Stage ───────────────────────────────────────────
+# ============================================================
+
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
 # Install required packages
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache \
+    git \
+    ca-certificates \
+    tzdata \
+    build-base
 
-# Copy go mod
+# Copy Go module files
+COPY go.mod ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy application source
+COPY . .
+
+# Optional Git commit/version
+ARG GIT_COMMIT=local
+
+# Build statically linked binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s -X main.version=${GIT_COMMIT}" \
+    -o auth-service \
+    ./main.go
+
+
+# ============================================================
+# ── Development Stage ───────────────────────────────────────
+# ============================================================
+
+FROM golang:1.22-alpine AS development
+
+WORKDIR /app
+
+# Install required packages
+RUN apk add --no-cache \
+    git \
+    curl \
+    wget \
+    build-base \
+    ca-certificates
+
+# Install Air (hot reload)
+RUN wget -O /usr/local/bin/air \
+    https://github.com/air-verse/air/releases/latest/download/air_linux_amd64 && \
+    chmod +x /usr/local/bin/air
+
+# Copy Go module files
 COPY go.mod ./
 
 # Download dependencies
@@ -20,65 +71,35 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Optional build arg
-ARG GIT_COMMIT=local
-
-# Build binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s -X main.version=${GIT_COMMIT}" \
-    -o auth-service \
-    ./main.go
-
-
-# ── Development Stage ─────────────────────────────────────
-FROM golang:1.22-alpine AS development
-
-WORKDIR /app
-
-# Install dependencies
-RUN apk add --no-cache git
-
-# Add Go bin to PATH
-ENV PATH="/go/bin:${PATH}"
-
-# Install Air
-RUN go install github.com/air-verse/air@latest
-
-# Copy go mod
-COPY go.mod ./
-
-# Download dependencies
-RUN go mod download
-
-# Copy source
-COPY . .
-
-# Expose ports
+# Expose application port + metrics port
 EXPOSE 8081 9090
 
-# Start hot reload
+# Start application with hot reload
 CMD ["air", "-c", ".air.toml"]
 
 
-# ── Production Stage ──────────────────────────────────────
+# ============================================================
+# ── Production Stage ────────────────────────────────────────
+# ============================================================
+
 FROM gcr.io/distroless/static-debian12:nonroot AS production
 
 WORKDIR /app
 
-# Copy binary
+# Copy compiled binary
 COPY --from=builder /app/auth-service /app/auth-service
 
-# Copy SSL certs
+# Copy SSL certificates
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Copy timezone info
+# Copy timezone data
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Non-root user
+# Run as non-root user
 USER nonroot:nonroot
 
-# Expose ports
+# Expose service ports
 EXPOSE 8081 9090
 
-# Start service
+# Start application
 ENTRYPOINT ["/app/auth-service"]
