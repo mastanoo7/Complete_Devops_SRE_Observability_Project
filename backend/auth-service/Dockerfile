@@ -11,8 +11,8 @@ WORKDIR /app
 # Install required packages
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy go mod
+COPY go.mod ./
 
 # Download dependencies
 RUN go mod download
@@ -20,10 +20,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Optional build arg for versioning
+# Optional build arg
 ARG GIT_COMMIT=local
 
-# Build static binary
+# Build binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.version=${GIT_COMMIT}" \
     -o auth-service \
@@ -38,25 +38,25 @@ WORKDIR /app
 # Install dependencies
 RUN apk add --no-cache git
 
-# Add Go binaries to PATH
+# Add Go bin to PATH
 ENV PATH="/go/bin:${PATH}"
 
-# Install Air for hot reload
+# Install Air
 RUN go install github.com/air-verse/air@latest
 
-# Copy dependency files
-COPY go.mod go.sum ./
+# Copy go mod
+COPY go.mod ./
 
 # Download dependencies
 RUN go mod download
 
-# Copy source code
+# Copy source
 COPY . .
 
-# Expose application and metrics ports
+# Expose ports
 EXPOSE 8081 9090
 
-# Start with hot reload
+# Start hot reload
 CMD ["air", "-c", ".air.toml"]
 
 
@@ -65,20 +65,20 @@ FROM gcr.io/distroless/static-debian12:nonroot AS production
 
 WORKDIR /app
 
-# Copy compiled binary
+# Copy binary
 COPY --from=builder /app/auth-service /app/auth-service
 
 # Copy SSL certs
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Copy timezone data
+# Copy timezone info
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Run as non-root user
+# Non-root user
 USER nonroot:nonroot
 
 # Expose ports
 EXPOSE 8081 9090
 
-# Start application
+# Start service
 ENTRYPOINT ["/app/auth-service"]
