@@ -1,0 +1,78 @@
+# ============================================================
+# DEV Overlay — Kustomization
+# Reduced resources, single replicas, debug logging
+# ============================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: nexacommerce-dev
+
+namespace: nexacommerce-dev
+
+bases:
+  - ../../base
+
+images:
+  - name: REGISTRY/nexacommerce/frontend
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/auth-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/product-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/cart-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/order-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/payment-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/inventory-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/search-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/notification-service
+    newTag: "latest"
+
+commonLabels:
+  environment: development
+
+patches:
+  # Scale down to 1 replica in dev
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+  # Reduce resource limits in dev
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "100m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "128Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "512Mi"
+    target:
+      kind: Deployment
+  # Disable PDBs in dev (only 1 replica)
+  - patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
+    target:
+      kind: PodDisruptionBudget
+
+configMapGenerator:
+  - name: dev-environment-config
+    literals:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=debug
+      - TRACING_SAMPLE_RATE=1.0
+      - CACHE_TTL_PRODUCTS=30

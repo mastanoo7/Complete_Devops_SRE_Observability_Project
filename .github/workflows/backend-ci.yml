@@ -1,0 +1,237 @@
+# ============================================================
+# GitHub Actions — Backend CI Pipeline
+# Runs on all backend service changes
+# ============================================================
+
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop, "release/**"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+
+env:
+  REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # ── Detect Changed Services ──────────────────────────────
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changes.outputs.services }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          SERVICES=$(git diff --name-only HEAD~1 HEAD \
+            | grep "^backend/" \
+            | cut -d'/' -f2 \
+            | sort -u \
+            | jq -R -s -c 'split("\n")[:-1]')
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          echo "matrix={\"service\":${{ steps.changes.outputs.services }}}" >> $GITHUB_OUTPUT
+
+  # ── Lint & Format ────────────────────────────────────────
+  lint:
+    name: Lint — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect service language
+        id: lang
+        run: |
+          if [ -f "backend/${{ matrix.service }}/go.mod" ]; then
+            echo "lang=go" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/pom.xml" ]; then
+            echo "lang=java" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/package.json" ]; then
+            echo "lang=node" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/requirements.txt" ]; then
+            echo "lang=python" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Go
+        if: steps.lang.outputs.lang == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: backend/${{ matrix.service }}/go.sum
+
+      - name: Lint Go
+        if: steps.lang.outputs.lang == 'go'
+        uses: golangci/golangci-lint-action@v4
+        with:
+          working-directory: backend/${{ matrix.service }}
+          version: latest
+
+      - name: Setup Java
+        if: steps.lang.outputs.lang == 'java'
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Lint Java (Checkstyle)
+        if: steps.lang.outputs.lang == 'java'
+        run: |
+          cd backend/${{ matrix.service }}
+          mvn checkstyle:check -q
+
+      - name: Setup Node.js
+        if: steps.lang.outputs.lang == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/${{ matrix.service }}/package-lock.json
+
+      - name: Lint Node.js
+        if: steps.lang.outputs.lang == 'node'
+        run: |
+          cd backend/${{ matrix.service }}
+          npm ci && npm run lint
+
+      - name: Setup Python
+        if: steps.lang.outputs.lang == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Lint Python
+        if: steps.lang.outputs.lang == 'python'
+        run: |
+          cd backend/${{ matrix.service }}
+          pip install flake8 black isort
+          flake8 . --max-line-length=120
+          black --check .
+          isort --check-only .
+
+  # ── Unit Tests ───────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [detect-changes, lint]
+    if: needs.detect-changes.outputs.services != '[]'
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect service language
+        id: lang
+        run: |
+          if [ -f "backend/${{ matrix.service }}/go.mod" ]; then
+            echo "lang=go" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/pom.xml" ]; then
+            echo "lang=java" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/package.json" ]; then
+            echo "lang=node" >> $GITHUB_OUTPUT
+          elif [ -f "backend/${{ matrix.service }}/requirements.txt" ]; then
+            echo "lang=python" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Go tests
+        if: steps.lang.outputs.lang == 'go'
+        run: |
+          cd backend/${{ matrix.service }}
+          go test ./... -v -race -coverprofile=coverage.out
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Run Java tests
+        if: steps.lang.outputs.lang == 'java'
+        run: |
+          cd backend/${{ matrix.service }}
+          mvn test -q
+
+      - name: Run Node tests
+        if: steps.lang.outputs.lang == 'node'
+        run: |
+          cd backend/${{ matrix.service }}
+          npm ci && npm test -- --coverage
+
+      - name: Run Python tests
+        if: steps.lang.outputs.lang == 'python'
+        run: |
+          cd backend/${{ matrix.service }}
+          pip install -r requirements-dev.txt
+          pytest --cov=. --cov-report=xml -v
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          flags: ${{ matrix.service }}
+          fail_ci_if_error: false
+
+  # ── Build Docker Images ──────────────────────────────────
+  build:
+    name: Build — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [detect-changes, unit-tests]
+    if: needs.detect-changes.outputs.services != '[]'
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      fail-fast: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: backend/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/nexacommerce/${{ matrix.service }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/nexacommerce/${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Output image digest
+        run: echo "Image pushed with tag ${{ env.IMAGE_TAG }}"

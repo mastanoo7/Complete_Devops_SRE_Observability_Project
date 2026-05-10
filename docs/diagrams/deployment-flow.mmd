@@ -1,0 +1,83 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3FB950', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2EA043', 'lineColor': '#3FB950', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif'}}}%%
+
+graph TB
+    classDef trigger fill:#238636,stroke:#1a6329,color:#fff,rx:6
+    classDef build fill:#2088FF,stroke:#1A6FCC,color:#fff,rx:6
+    classDef gate fill:#DA3633,stroke:#B02A2A,color:#fff,rx:6
+    classDef deploy fill:#3FB950,stroke:#2EA043,color:#fff,rx:6
+    classDef verify fill:#E3B341,stroke:#B08800,color:#000,rx:6
+    classDef rollback fill:#F78166,stroke:#C4614D,color:#fff,rx:6
+
+    subgraph TRIGGER ["⚡ Deployment Triggers"]
+        MERGE["🔀 PR Merged\nto main branch\n→ DEV deploy"]:::trigger
+        TAG["🏷️ Release Tag\nv1.2.3 created\n→ STAGING deploy"]:::trigger
+        MANUAL["👤 Manual Trigger\nSRE approval\n→ PROD deploy"]:::trigger
+    end
+
+    subgraph BUILD_PHASE ["🔨 Build Phase"]
+        BUILD_IMG["🐳 Build Image\nDocker BuildKit\nMulti-arch: amd64/arm64"]:::build
+        SCAN_IMG["🔍 Scan Image\nTrivy + Grype\nBlock on CRITICAL CVEs"]:::build
+        SIGN_IMG["✍️ Sign Image\nCosign + Sigstore\nKeyless signing"]:::build
+        PUSH_IMG["📤 Push to Registry\nECR + ACR + AR\nTag: sha-{commit}"]:::build
+    end
+
+    subgraph DEV_DEPLOY ["🔧 DEV Deployment"]
+        DEV_SYNC["🔄 ArgoCD Sync\nAuto-sync enabled\nNamespace: dev"]:::deploy
+        DEV_SMOKE["💨 Smoke Tests\nBasic health checks\n< 2 minutes"]:::verify
+        DEV_NOTIFY["💬 Slack Notify\n#dev-deployments\nDeploy status"]:::verify
+    end
+
+    subgraph STAGING_DEPLOY ["🧪 STAGING Deployment"]
+        STG_SYNC["🔄 ArgoCD Sync\nAuto-sync on tag\nNamespace: staging"]:::deploy
+        STG_E2E["🧪 E2E Tests\nPlaywright + Cypress\n~15 minutes"]:::verify
+        STG_PERF["⚡ Performance Tests\nk6 load test\nP99 < 200ms"]:::verify
+        STG_DAST["🔒 DAST Scan\nOWASP ZAP\nSecurity validation"]:::gate
+        STG_APPROVE["✅ Staging Approval\nQA sign-off\nRequired: 1 approver"]:::gate
+    end
+
+    subgraph PROD_DEPLOY ["🏭 PRODUCTION Deployment"]
+        PROD_GATE["🚦 Production Gate\nSRE approval required\nChange window check"]:::gate
+        CANARY_5["🐦 Canary 5%\nRoute 5% traffic\nMonitor 10 minutes"]:::deploy
+        CANARY_CHECK_1["📊 Canary Analysis\nError rate < 0.1%\nLatency P99 < 200ms"]:::verify
+        CANARY_25["🐦 Canary 25%\nRoute 25% traffic\nMonitor 10 minutes"]:::deploy
+        CANARY_CHECK_2["📊 Canary Analysis\nAll metrics green\nAuto-promote"]:::verify
+        CANARY_100["🚀 Full Rollout\n100% traffic\nOld pods terminated"]:::deploy
+        PROD_VERIFY["✅ Production Verify\nSynthetic monitoring\nSLO check"]:::verify
+    end
+
+    subgraph ROLLBACK ["🔙 Rollback Procedures"]
+        AUTO_ROLLBACK["🤖 Auto Rollback\nError rate > 1%\nLatency P99 > 500ms\nTriggered by Argo Rollouts"]:::rollback
+        MANUAL_ROLLBACK["👤 Manual Rollback\nargocd app rollback\nPrevious image tag"]:::rollback
+        DB_ROLLBACK["🗄️ DB Rollback\nFlyway undo migration\nPoint-in-time restore"]:::rollback
+    end
+
+    MERGE --> BUILD_IMG
+    TAG --> BUILD_IMG
+    MANUAL --> PROD_GATE
+
+    BUILD_IMG --> SCAN_IMG
+    SCAN_IMG --> SIGN_IMG
+    SIGN_IMG --> PUSH_IMG
+
+    PUSH_IMG --> DEV_SYNC
+    DEV_SYNC --> DEV_SMOKE
+    DEV_SMOKE --> DEV_NOTIFY
+
+    PUSH_IMG --> STG_SYNC
+    STG_SYNC --> STG_E2E
+    STG_E2E --> STG_PERF
+    STG_PERF --> STG_DAST
+    STG_DAST --> STG_APPROVE
+
+    STG_APPROVE --> PROD_GATE
+    PROD_GATE --> CANARY_5
+    CANARY_5 --> CANARY_CHECK_1
+    CANARY_CHECK_1 -->|"✅ Pass"| CANARY_25
+    CANARY_CHECK_1 -->|"❌ Fail"| AUTO_ROLLBACK
+    CANARY_25 --> CANARY_CHECK_2
+    CANARY_CHECK_2 -->|"✅ Pass"| CANARY_100
+    CANARY_CHECK_2 -->|"❌ Fail"| AUTO_ROLLBACK
+    CANARY_100 --> PROD_VERIFY
+    PROD_VERIFY -->|"❌ SLO breach"| MANUAL_ROLLBACK
+
+    AUTO_ROLLBACK --> DB_ROLLBACK

@@ -1,0 +1,127 @@
+# ============================================================
+# Istio — AuthorizationPolicies
+# Fine-grained service-to-service access control
+# ============================================================
+
+---
+# Deny all by default (explicit allow required)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: nexacommerce-prod
+spec:
+  {}
+---
+# Allow Kong gateway to reach all services
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-kong-to-services
+  namespace: nexacommerce-prod
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["kong"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+# Allow order-service to call payment-service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-order-to-payment
+  namespace: nexacommerce-prod
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/nexacommerce-prod/sa/order-service"
+      to:
+        - operation:
+            methods: ["POST"]
+            paths: ["/api/v1/payments/*", "/api/v1/refunds/*"]
+---
+# Allow order-service to call inventory-service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-order-to-inventory
+  namespace: nexacommerce-prod
+spec:
+  selector:
+    matchLabels:
+      app: inventory-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/nexacommerce-prod/sa/order-service"
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT"]
+            paths: ["/api/v1/inventory/*", "/api/v1/reservations/*"]
+---
+# Allow product-service to be called by frontend and search
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-to-product-service
+  namespace: nexacommerce-prod
+spec:
+  selector:
+    matchLabels:
+      app: product-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/nexacommerce-prod/sa/frontend"
+              - "cluster.local/ns/nexacommerce-prod/sa/search-service"
+              - "cluster.local/ns/nexacommerce-prod/sa/recommendation-service"
+              - "cluster.local/ns/kong/sa/kong"
+---
+# Allow Prometheus to scrape metrics from all services
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: nexacommerce-prod
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["monitoring"]
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/metrics", "/actuator/prometheus"]
+---
+# Allow health checks from Kubernetes (kubelet)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-health-checks
+  namespace: nexacommerce-prod
+spec:
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            methods: ["GET"]
+            paths:
+              - "/health/*"
+              - "/actuator/health/*"
+              - "/readyz"
+              - "/livez"

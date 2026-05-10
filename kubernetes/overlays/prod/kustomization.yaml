@@ -1,0 +1,72 @@
+# ============================================================
+# Production Overlay — Kustomization
+# Patches base manifests for production environment
+# ============================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: nexacommerce-prod
+
+namespace: nexacommerce-prod
+
+bases:
+  - ../../base
+
+# ── Image Tags ───────────────────────────────────────────────
+images:
+  - name: REGISTRY/nexacommerce/frontend
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/auth-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/product-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/cart-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/order-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/payment-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/inventory-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/search-service
+    newTag: "1.0.0"
+  - name: REGISTRY/nexacommerce/notification-service
+    newTag: "1.0.0"
+
+# ── Common Labels ────────────────────────────────────────────
+commonLabels:
+  environment: production
+  managed-by: argocd
+
+# ── Common Annotations ───────────────────────────────────────
+commonAnnotations:
+  deployment.kubernetes.io/environment: production
+
+# ── Patches ──────────────────────────────────────────────────
+patches:
+  # Scale up replicas for production
+  - path: patches/replicas-patch.yaml
+    target:
+      kind: Deployment
+
+  # Production resource limits
+  - path: patches/resources-patch.yaml
+    target:
+      kind: Deployment
+
+# ── ConfigMap Generator ──────────────────────────────────────
+configMapGenerator:
+  - name: prod-environment-config
+    literals:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - TRACING_SAMPLE_RATE=0.1
+
+# ── Additional Resources ─────────────────────────────────────
+resources:
+  - istio/peer-authentication.yaml
+  - istio/authorization-policies.yaml
+  - istio/virtual-services.yaml
+  - istio/destination-rules.yaml

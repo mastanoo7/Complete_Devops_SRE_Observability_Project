@@ -1,0 +1,119 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#FF9900',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#FF6600',
+    'lineColor': '#FF9900',
+    'secondaryColor': '#1a1a2e',
+    'tertiaryColor': '#232F3E',
+    'clusterBkg': '#232F3E',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph TB
+    classDef awsService fill:#FF9900,stroke:#FF6600,color:#fff,rx:6
+    classDef awsNetwork fill:#8C4FFF,stroke:#6B3FCC,color:#fff,rx:6
+    classDef awsDB fill:#3F48CC,stroke:#2E37A0,color:#fff,rx:6
+    classDef awsCompute fill:#ED7100,stroke:#C45A00,color:#fff,rx:6
+    classDef awsSecurity fill:#DD344C,stroke:#B02A3D,color:#fff,rx:6
+    classDef awsStorage fill:#3F8624,stroke:#2E6119,color:#fff,rx:6
+    classDef awsMonitor fill:#E7157B,stroke:#B80F60,color:#fff,rx:6
+    classDef internet fill:#232F3E,stroke:#FF9900,color:#FF9900,rx:6
+
+    INTERNET(["🌍 Internet Traffic"]):::internet
+
+    subgraph GLOBAL ["🌐 AWS Global Edge"]
+        R53["🔀 Route 53\nGlobal DNS + Health Checks\nLatency-based routing"]:::awsNetwork
+        CF["📦 CloudFront\nCDN + WAF + Shield\n450+ PoPs globally"]:::awsNetwork
+        SHIELD["🛡️ AWS Shield Advanced\nDDoS Protection\nL3/L4/L7"]:::awsSecurity
+    end
+
+    subgraph US_EAST ["📍 us-east-1 — Primary Region"]
+        subgraph VPC_EAST ["🔒 VPC: 10.0.0.0/16"]
+            subgraph PUBLIC_EAST ["Public Subnets (3 AZs)"]
+                ALB_EAST["⚖️ Application Load Balancer\nHTTPS:443 + HTTP:80→443\nCross-zone enabled"]:::awsNetwork
+                NAT_EAST["🔀 NAT Gateway\n3x (one per AZ)\nHA configuration"]:::awsNetwork
+            end
+
+            subgraph PRIVATE_EAST ["Private Subnets (3 AZs)"]
+                EKS_EAST["☸️ Amazon EKS 1.29\nManaged Node Groups\n3x m5.2xlarge per AZ"]:::awsCompute
+                FARGATE["⚡ EKS Fargate\nServerless pods\nBatch workloads"]:::awsCompute
+            end
+
+            subgraph DATA_EAST ["Data Subnets (3 AZs)"]
+                AURORA_W["🗄️ Aurora PostgreSQL\nWriter Instance\nr6g.2xlarge"]:::awsDB
+                AURORA_R1["🗄️ Aurora PostgreSQL\nReader 1 (AZ-b)"]:::awsDB
+                AURORA_R2["🗄️ Aurora PostgreSQL\nReader 2 (AZ-c)"]:::awsDB
+                REDIS_EAST["⚡ ElastiCache Redis\n6.x Cluster Mode\n3 shards x 2 replicas"]:::awsDB
+                MSK["📨 Amazon MSK\nKafka 3.5\n3 broker cluster"]:::awsDB
+            end
+        end
+    end
+
+    subgraph US_WEST ["📍 us-west-2 — Secondary Region"]
+        subgraph VPC_WEST ["🔒 VPC: 10.1.0.0/16"]
+            ALB_WEST["⚖️ ALB West\nFailover target"]:::awsNetwork
+            EKS_WEST["☸️ EKS West\nStandby cluster\nAuto-scales on failover"]:::awsCompute
+            AURORA_WEST["🗄️ Aurora Global DB\nRead replica\nRPO < 1s"]:::awsDB
+            REDIS_WEST["⚡ ElastiCache West\nRead replica"]:::awsDB
+        end
+    end
+
+    subgraph SHARED_SERVICES ["🔧 Shared AWS Services"]
+        ECR["📦 ECR\nContainer Registry\nImage scanning enabled"]:::awsStorage
+        S3_ASSETS["🪣 S3 Assets\nMedia + Static files\nVersioning + Replication"]:::awsStorage
+        S3_LOGS["🪣 S3 Logs\nALB + CloudFront logs\n90-day retention"]:::awsStorage
+        SECRETS["🔑 Secrets Manager\nDB credentials\nAPI keys rotation"]:::awsSecurity
+        KMS["🔐 AWS KMS\nEncryption keys\nCMK per service"]:::awsSecurity
+        IAM["👤 IAM + IRSA\nPod-level IAM roles\nLeast privilege"]:::awsSecurity
+        CLOUDWATCH["📊 CloudWatch\nMetrics + Logs\nContainer Insights"]:::awsMonitor
+        XRAY["🔍 AWS X-Ray\nDistributed tracing\nService map"]:::awsMonitor
+        SQS["📨 SQS\nDead letter queues\nFIFO queues"]:::awsService
+        SNS["🔔 SNS\nNotifications\nFan-out pattern"]:::awsService
+        OPENSEARCH["🔍 OpenSearch\nProduct search\n3-node cluster"]:::awsDB
+        DOCUMENTDB["📄 DocumentDB\nMongoDB compatible\nRecommendations"]:::awsDB
+    end
+
+    subgraph CICD_AWS ["🔄 CI/CD (AWS)"]
+        CODECOMMIT["📁 CodeCommit\nSource mirror"]:::awsService
+        CODEBUILD["🔨 CodeBuild\nBuild + Test"]:::awsService
+        CODEPIPELINE["🔄 CodePipeline\nOrchestration"]:::awsService
+    end
+
+    INTERNET --> R53
+    R53 --> CF
+    CF --> SHIELD
+    SHIELD --> ALB_EAST
+    SHIELD --> ALB_WEST
+
+    ALB_EAST --> EKS_EAST
+    ALB_EAST --> FARGATE
+    ALB_WEST --> EKS_WEST
+
+    EKS_EAST --> AURORA_W
+    AURORA_W --> AURORA_R1
+    AURORA_W --> AURORA_R2
+    AURORA_W -.->|"Global DB\nReplication"| AURORA_WEST
+
+    EKS_EAST --> REDIS_EAST
+    EKS_EAST --> MSK
+    EKS_EAST --> OPENSEARCH
+    EKS_EAST --> DOCUMENTDB
+    EKS_EAST --> SQS
+    EKS_EAST --> SNS
+
+    EKS_EAST --> SECRETS
+    EKS_EAST --> KMS
+    IAM --> EKS_EAST
+
+    EKS_EAST --> CLOUDWATCH
+    EKS_EAST --> XRAY
+
+    ECR --> EKS_EAST
+    ECR --> EKS_WEST
+    S3_ASSETS --> CF
+
+    CODEPIPELINE --> ECR
+    CODEBUILD --> CODEPIPELINE

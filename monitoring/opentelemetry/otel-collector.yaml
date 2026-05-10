@@ -1,0 +1,234 @@
+# ============================================================
+# OpenTelemetry Collector — Production Configuration
+# Collects metrics, logs, and traces from all services
+# ============================================================
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+receivers:
+  # ── OTLP receiver (gRPC + HTTP) ──────────────────────────
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 32
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins: ["*"]
+
+  # ── Prometheus scraping ──────────────────────────────────
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 15s
+          static_configs:
+            - targets: [localhost:8888]
+
+  # ── Kubernetes events ────────────────────────────────────
+  k8s_events:
+    namespaces: [nexacommerce-prod, nexacommerce-staging]
+
+  # ── Host metrics ─────────────────────────────────────────
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk: {}
+      network: {}
+      filesystem: {}
+      load: {}
+
+  # ── Jaeger receiver ──────────────────────────────────────
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+
+processors:
+  # ── Batch processor ──────────────────────────────────────
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # ── Memory limiter ───────────────────────────────────────
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1500
+    spike_limit_mib: 512
+
+  # ── Resource detection ───────────────────────────────────
+  resourcedetection:
+    detectors: [env, eks, ec2]
+    timeout: 5s
+    override: false
+
+  # ── Kubernetes attributes ────────────────────────────────
+  k8sattributes:
+    auth_type: serviceAccount
+    passthrough: false
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.deployment.name
+        - k8s.namespace.name
+        - k8s.node.name
+        - k8s.pod.start_time
+      labels:
+        - tag_name: app
+          key: app
+          from: pod
+        - tag_name: version
+          key: version
+          from: pod
+        - tag_name: team
+          key: team
+          from: pod
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+      - sources:
+          - from: connection
+
+  # ── Attributes processor ─────────────────────────────────
+  attributes:
+    actions:
+      - key: environment
+        value: production
+        action: upsert
+      - key: cluster
+        value: nexacommerce-prod
+        action: upsert
+
+  # ── Filter sensitive data ────────────────────────────────
+  filter/drop_health_checks:
+    traces:
+      span:
+        - 'attributes["http.url"] == "/health"'
+        - 'attributes["http.url"] == "/health/live"'
+        - 'attributes["http.url"] == "/health/ready"'
+        - 'attributes["http.url"] == "/metrics"'
+
+  # ── Tail sampling ────────────────────────────────────────
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      - name: errors-policy
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+      - name: slow-traces-policy
+        type: latency
+        latency: {threshold_ms: 1000}
+      - name: payment-traces-policy
+        type: string_attribute
+        string_attribute:
+          key: service.name
+          values: [payment-service]
+      - name: probabilistic-policy
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+
+exporters:
+  # ── Prometheus remote write ──────────────────────────────
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # ── Loki (logs) ──────────────────────────────────────────
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tls:
+      insecure: true
+    labels:
+      resource:
+        service.name: "service"
+        k8s.namespace.name: "namespace"
+        k8s.pod.name: "pod"
+        k8s.deployment.name: "deployment"
+
+  # ── Jaeger (traces) ──────────────────────────────────────
+  jaeger:
+    endpoint: jaeger-collector:14250
+    tls:
+      insecure: true
+
+  # ── Tempo (traces) ───────────────────────────────────────
+  otlp/tempo:
+    endpoint: http://tempo:4317
+    tls:
+      insecure: true
+
+  # ── Debug logging ────────────────────────────────────────
+  logging:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  extensions: [health_check, pprof, zpages]
+
+  pipelines:
+    # ── Traces pipeline ────────────────────────────────────
+    traces:
+      receivers: [otlp, jaeger]
+      processors:
+        - memory_limiter
+        - k8sattributes
+        - resourcedetection
+        - attributes
+        - filter/drop_health_checks
+        - tail_sampling
+        - batch
+      exporters: [jaeger, otlp/tempo, logging]
+
+    # ── Metrics pipeline ───────────────────────────────────
+    metrics:
+      receivers: [otlp, prometheus, hostmetrics]
+      processors:
+        - memory_limiter
+        - k8sattributes
+        - resourcedetection
+        - attributes
+        - batch
+      exporters: [prometheusremotewrite, logging]
+
+    # ── Logs pipeline ──────────────────────────────────────
+    logs:
+      receivers: [otlp, k8s_events]
+      processors:
+        - memory_limiter
+        - k8sattributes
+        - resourcedetection
+        - attributes
+        - batch
+      exporters: [loki, logging]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

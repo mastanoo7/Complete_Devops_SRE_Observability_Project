@@ -1,0 +1,393 @@
+# ============================================================
+# NexaCommerce — Docker Compose (Local Development)
+# Full platform stack for local development
+# ============================================================
+
+version: "3.9"
+
+# ── Shared Networks ──────────────────────────────────────────
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+  data-net:
+    driver: bridge
+  monitoring-net:
+    driver: bridge
+
+# ── Shared Volumes ───────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  elasticsearch_data:
+  mongodb_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+# ── Services ─────────────────────────────────────────────────
+services:
+
+  # ── Infrastructure ─────────────────────────────────────────
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: nexacommerce-postgres
+    environment:
+      POSTGRES_USER: nexacommerce
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev123}
+      POSTGRES_MULTIPLE_DATABASES: auth_db,product_db,order_db,payment_db,inventory_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/db/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init.sh
+    ports:
+      - "5432:5432"
+    networks: [data-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexacommerce"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexacommerce-redis
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-localdev123}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks: [data-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexacommerce-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks: [data-net]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexacommerce-kafka
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+    networks: [data-net]
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: nexacommerce-kafka-ui
+    depends_on: [kafka]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+    networks: [data-net, frontend-net]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: nexacommerce-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks: [data-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  mongodb:
+    image: mongo:7.0
+    container_name: nexacommerce-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexacommerce
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-localdev123}
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks: [data-net]
+
+  # ── Application Services ────────────────────────────────────
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-api-gateway
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      AUTH_SERVICE_URL: http://auth-service:8081
+      PRODUCT_SERVICE_URL: http://product-service:8082
+      CART_SERVICE_URL: http://cart-service:8083
+      ORDER_SERVICE_URL: http://order-service:8084
+      PAYMENT_SERVICE_URL: http://payment-service:8085
+      REDIS_URL: redis://:${REDIS_PASSWORD:-localdev123}@redis:6379
+    ports:
+      - "8080:8080"
+    networks: [frontend-net, backend-net]
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/api-gateway:/app
+      - /app/node_modules
+
+  auth-service:
+    build:
+      context: ./backend/auth-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-auth
+    environment:
+      PORT: 8081
+      DATABASE_URL: postgres://nexacommerce:${POSTGRES_PASSWORD:-localdev123}@postgres:5432/auth_db
+      REDIS_URL: redis://:${REDIS_PASSWORD:-localdev123}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-in-prod}
+      JWT_EXPIRY: 15m
+      REFRESH_TOKEN_EXPIRY: 7d
+    ports:
+      - "8081:8081"
+    networks: [backend-net, data-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: ./backend/product-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-product
+    environment:
+      SERVER_PORT: 8082
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/product_db
+      SPRING_DATASOURCE_USERNAME: nexacommerce
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-localdev123}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD:-localdev123}
+      ELASTICSEARCH_URIS: http://elasticsearch:9200
+    ports:
+      - "8082:8082"
+    networks: [backend-net, data-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  cart-service:
+    build:
+      context: ./backend/cart-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-cart
+    environment:
+      PORT: 8083
+      REDIS_URL: redis://:${REDIS_PASSWORD:-localdev123}@redis:6379
+      PRODUCT_SERVICE_URL: http://product-service:8082
+    ports:
+      - "8083:8083"
+    networks: [backend-net, data-net]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: ./backend/order-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-order
+    environment:
+      SERVER_PORT: 8084
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_db
+      SPRING_DATASOURCE_USERNAME: nexacommerce
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-localdev123}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PAYMENT_SERVICE_URL: http://payment-service:8085
+      INVENTORY_SERVICE_URL: http://inventory-service:8086
+    ports:
+      - "8084:8084"
+    networks: [backend-net, data-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: ./backend/payment-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-payment
+    environment:
+      PORT: 8085
+      DATABASE_URL: postgres://nexacommerce:${POSTGRES_PASSWORD:-localdev123}@postgres:5432/payment_db
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "8085:8085"
+    networks: [backend-net, data-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inventory-service:
+    build:
+      context: ./backend/inventory-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-inventory
+    environment:
+      PORT: 8086
+      DATABASE_URL: postgresql://nexacommerce:${POSTGRES_PASSWORD:-localdev123}@postgres:5432/inventory_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8086:8086"
+    networks: [backend-net, data-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./backend/notification-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-notification
+    environment:
+      PORT: 8087
+      MONGODB_URI: mongodb://nexacommerce:${MONGO_PASSWORD:-localdev123}@mongodb:27017/notifications
+      KAFKA_BROKERS: kafka:9092
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: 1025
+    ports:
+      - "8087:8087"
+    networks: [backend-net, data-net]
+    depends_on: [mongodb, kafka]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexacommerce-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_ENV: development
+    ports:
+      - "3000:3000"
+    networks: [frontend-net]
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on: [api-gateway]
+
+  # ── Dev Tools ───────────────────────────────────────────────
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: nexacommerce-mailhog
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    networks: [backend-net]
+
+  # ── Monitoring ──────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.49.0
+    container_name: nexacommerce-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/rules/:/etc/prometheus/rules/
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [monitoring-net, backend-net]
+
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: nexacommerce-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"
+    networks: [monitoring-net, frontend-net]
+    depends_on: [prometheus]
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: nexacommerce-loki
+    command: -config.file=/etc/loki/loki-local.yaml
+    volumes:
+      - ./logging/loki/loki-local.yaml:/etc/loki/loki-local.yaml
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    networks: [monitoring-net]
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: nexacommerce-promtail
+    command: -config.file=/etc/promtail/promtail-local.yaml
+    volumes:
+      - ./logging/promtail/promtail-local.yaml:/etc/promtail/promtail-local.yaml
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks: [monitoring-net]
+    depends_on: [loki]

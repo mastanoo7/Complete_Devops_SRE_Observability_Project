@@ -1,0 +1,87 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#16a085', 'primaryTextColor': '#fff', 'primaryBorderColor': '#117a65', 'lineColor': '#16a085', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif'}}}%%
+
+graph TB
+    classDef collect fill:#E6522C,stroke:#B03A1E,color:#fff,rx:6
+    classDef store fill:#326CE5,stroke:#2150B0,color:#fff,rx:6
+    classDef visualize fill:#F46800,stroke:#C05000,color:#fff,rx:6
+    classDef alert fill:#DA3633,stroke:#B02A2A,color:#fff,rx:6
+    classDef trace fill:#8957E5,stroke:#6E40C9,color:#fff,rx:6
+    classDef log fill:#238636,stroke:#1a6329,color:#fff,rx:6
+    classDef service fill:#2c3e50,stroke:#1a252f,color:#fff,rx:6
+
+    subgraph SOURCES ["📡 Telemetry Sources"]
+        SVC_A["🔐 Auth Service\nmetrics :9090\nlogs stdout\ntraces OTLP"]:::service
+        SVC_B["📦 Product Service\nmetrics :9090\nlogs stdout\ntraces OTLP"]:::service
+        SVC_C["🛒 Cart Service\nmetrics :9090\nlogs stdout\ntraces OTLP"]:::service
+        SVC_D["💳 Payment Service\nmetrics :9090\nlogs stdout\ntraces OTLP"]:::service
+        ISTIO_MESH["🕸️ Istio Envoy Sidecars\nHTTP metrics\nTCP metrics\nAccess logs"]:::service
+        K8S_NODES["☸️ K8s Nodes\nkubelet metrics\ncAdvisor\nnode-exporter"]:::service
+    end
+
+    subgraph OTEL_LAYER ["🔭 OpenTelemetry Collector"]
+        OTEL_AGENT["📡 OTel Agent\nDaemonSet\nCollect from pods"]:::collect
+        OTEL_GATEWAY["🔀 OTel Gateway\nDeployment\nAggregate + route"]:::collect
+    end
+
+    subgraph METRICS_STACK ["📈 Metrics Pipeline"]
+        PROMETHEUS["📈 Prometheus\nHA pair\nRemote write enabled\n15s scrape interval"]:::store
+        THANOS["🔭 Thanos\nLong-term storage\nCross-cluster query\nS3 backend"]:::store
+        PROM_RULES["📋 Recording Rules\nPre-computed metrics\nSLO calculations"]:::store
+    end
+
+    subgraph LOGGING_STACK ["📝 Logging Pipeline"]
+        PROMTAIL["📡 Promtail\nDaemonSet\nLog scraping"]:::log
+        LOKI["📝 Loki\nDistributed mode\nS3 backend\n30-day retention"]:::log
+        FLUENTBIT["📡 FluentBit\nDaemonSet\nLog parsing + enrichment"]:::log
+        ELASTICSEARCH["🔍 Elasticsearch\n3-node cluster\nHot-warm-cold"]:::log
+        KIBANA["📊 Kibana\nLog visualization\nDashboards"]:::log
+    end
+
+    subgraph TRACING_STACK ["🔍 Tracing Pipeline"]
+        JAEGER["🔍 Jaeger\nDistributed tracing\nUI + Query"]:::trace
+        TEMPO["🔍 Grafana Tempo\nTrace storage\nS3 backend"]:::trace
+    end
+
+    subgraph VISUALIZATION ["📊 Visualization"]
+        GRAFANA["📊 Grafana\nUnified dashboards\nSSO + RBAC\n50+ dashboards"]:::visualize
+        GRAFANA_DASH["📋 Dashboards\n• SLO Overview\n• Service Health\n• Infrastructure\n• Business KPIs"]:::visualize
+    end
+
+    subgraph ALERTING ["🚨 Alerting Pipeline"]
+        ALERTMANAGER["🚨 AlertManager\nHA: 3 replicas\nDedup + routing\nSilencing"]:::alert
+        PAGERDUTY["📟 PagerDuty\nOn-call rotation\nEscalation policy"]:::alert
+        SLACK_ALERT["💬 Slack\n#alerts-critical\n#alerts-warning"]:::alert
+        OPSGENIE["📟 OpsGenie\nBackup alerting\nRunbook links"]:::alert
+    end
+
+    SVC_A --> OTEL_AGENT
+    SVC_B --> OTEL_AGENT
+    SVC_C --> OTEL_AGENT
+    SVC_D --> OTEL_AGENT
+    ISTIO_MESH --> OTEL_AGENT
+    K8S_NODES --> PROMETHEUS
+
+    OTEL_AGENT --> OTEL_GATEWAY
+    OTEL_GATEWAY --> PROMETHEUS
+    OTEL_GATEWAY --> LOKI
+    OTEL_GATEWAY --> JAEGER
+    OTEL_GATEWAY --> TEMPO
+
+    PROMETHEUS --> PROM_RULES
+    PROMETHEUS --> THANOS
+    PROMETHEUS --> ALERTMANAGER
+
+    PROMTAIL --> LOKI
+    FLUENTBIT --> ELASTICSEARCH
+    ELASTICSEARCH --> KIBANA
+
+    JAEGER --> GRAFANA
+    TEMPO --> GRAFANA
+    LOKI --> GRAFANA
+    THANOS --> GRAFANA
+
+    GRAFANA --> GRAFANA_DASH
+
+    ALERTMANAGER --> PAGERDUTY
+    ALERTMANAGER --> SLACK_ALERT
+    ALERTMANAGER --> OPSGENIE

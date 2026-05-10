@@ -1,0 +1,49 @@
+# ============================================================
+# ArgoCD — Production Application
+# Deploys nexacommerce to production cluster
+# ============================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nexacommerce-prod
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: nexacommerce-prod
+    environment: production
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: alerts-critical
+    notifications.argoproj.io/subscribe.on-sync-failed.pagerduty: oncall
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nexacommerce-prod
+  source:
+    repoURL: https://github.com/your-org/nexacommerce.git
+    targetRevision: HEAD
+    path: kubernetes/overlays/prod
+  destination:
+    server: https://eks-prod.us-east-1.eks.amazonaws.com
+    namespace: nexacommerce-prod
+  syncPolicy:
+    # Production: manual sync only (requires SRE approval)
+    automated: null
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas   # Managed by HPA
+  revisionHistoryLimit: 10

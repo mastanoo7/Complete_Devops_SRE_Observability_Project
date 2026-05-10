@@ -1,0 +1,138 @@
+# ============================================================
+# Promtail — Production Configuration
+# Scrapes logs from all Kubernetes pods and ships to Loki
+# ============================================================
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    tenant_id: nexacommerce
+    batchwait: 1s
+    batchsize: 1048576
+    timeout: 10s
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    external_labels:
+      cluster: nexacommerce-prod
+      environment: production
+
+scrape_configs:
+  # ── Kubernetes pod logs ──────────────────────────────────
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    pipeline_stages:
+      # Parse JSON logs
+      - json:
+          expressions:
+            level: level
+            message: message
+            timestamp: timestamp
+            trace_id: traceId
+            span_id: spanId
+            service: service
+            error: error
+
+      # Extract log level
+      - labels:
+          level:
+          service:
+          trace_id:
+
+      # Set timestamp from log
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # Drop health check logs (reduce noise)
+      - drop:
+          expression: '.*GET /health.*'
+          drop_counter_reason: health_check
+
+      # Drop metrics endpoint logs
+      - drop:
+          expression: '.*GET /metrics.*'
+          drop_counter_reason: metrics_scrape
+
+      # Mask sensitive data (PCI-DSS compliance)
+      - replace:
+          expression: '(\d{4})[- ]?(\d{4})[- ]?(\d{4})[- ]?(\d{4})'
+          replace: '****-****-****-$4'
+
+      # Mask email addresses in logs
+      - replace:
+          expression: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+          replace: '[REDACTED_EMAIL]'
+
+    relabel_configs:
+      # Only scrape pods with log annotation
+      - source_labels: [__meta_kubernetes_pod_annotation_nexacommerce_io_log_scrape]
+        action: keep
+        regex: "true|"
+
+      # Add namespace label
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+      # Add pod name label
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+
+      # Add container name label
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+
+      # Add app label from pod label
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+
+      # Add version label
+      - source_labels: [__meta_kubernetes_pod_label_version]
+        target_label: version
+
+      # Add team label
+      - source_labels: [__meta_kubernetes_pod_label_team]
+        target_label: team
+
+      # Set log path
+      - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+        target_label: __path__
+        separator: /
+        replacement: /var/log/pods/*$1/$2/*.log
+
+  # ── System logs ──────────────────────────────────────────
+  - job_name: system-logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: system
+          __path__: /var/log/syslog
+
+  # ── Kubernetes events ────────────────────────────────────
+  - job_name: kubernetes-events
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [kube-system]
+    pipeline_stages:
+      - json:
+          expressions:
+            event_type: type
+            reason: reason
+            message: message
+      - labels:
+          event_type:
+          reason:
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: event-exporter

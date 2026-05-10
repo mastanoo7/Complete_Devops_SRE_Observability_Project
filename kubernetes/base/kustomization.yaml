@@ -1,0 +1,52 @@
+# ============================================================
+# Kubernetes Base — Kustomization
+# Root kustomization for all base manifests
+# ============================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: nexacommerce-base
+
+resources:
+  # Namespaces
+  - namespaces.yaml
+
+  # Auth Service
+  - auth-service/deployment.yaml
+
+  # Product Service
+  - product-service/deployment.yaml
+
+  # Order Service
+  - order-service/deployment.yaml
+
+  # Payment Service
+  - payment-service/deployment.yaml
+
+  # Cart Service
+  - cart-service/deployment.yaml
+
+  # Inventory Service
+  - inventory-service/deployment.yaml
+
+  # Search Service
+  - search-service/deployment.yaml
+
+  # Notification Service
+  - notification-service/deployment.yaml
+
+  # Frontend
+  - frontend/deployment.yaml
+
+  # Network Policies
+  - network-policies/default-deny.yaml
+  - network-policies/allow-rules.yaml
+
+  # Resource Quotas
+  - resource-quotas.yaml
+
+commonLabels:
+  managed-by: kustomize
+  project: nexacommerce

@@ -1,0 +1,63 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#DD344C', 'primaryTextColor': '#fff', 'primaryBorderColor': '#B02A3D', 'lineColor': '#DD344C', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif', 'actorBkg': '#16213e', 'actorBorder': '#DD344C', 'actorTextColor': '#fff', 'activationBkgColor': '#1a1a2e', 'activationBorderColor': '#DD344C', 'noteBkgColor': '#0d1117', 'noteTextColor': '#aaa'}}}%%
+
+sequenceDiagram
+    actor User as 👤 User
+    participant Browser as 🌐 Browser
+    participant Kong as 🔀 Kong Gateway
+    participant Auth as 🔐 Auth Service
+    participant Vault as 🔑 HashiCorp Vault
+    participant Redis as ⚡ Redis
+    participant DB as 🗄️ PostgreSQL
+    participant OIDC as 🔑 OIDC Provider<br/>(Google/GitHub)
+
+    Note over User,OIDC: 🔐 OAuth2 / OIDC Login Flow
+
+    User->>Browser: Click "Login with Google"
+    Browser->>Kong: GET /auth/oauth/google
+    Kong->>Auth: Forward request
+    Auth->>Auth: Generate state + PKCE challenge
+    Auth->>Redis: SETEX state:{nonce} 300s
+    Auth-->>Browser: 302 Redirect → Google OAuth
+    Browser->>OIDC: GET /oauth/authorize?client_id=...&state=...
+    OIDC->>User: Show consent screen
+    User->>OIDC: Grant permissions
+    OIDC-->>Browser: 302 Redirect → /auth/callback?code=...&state=...
+    Browser->>Kong: GET /auth/callback?code=...
+    Kong->>Auth: Forward callback
+    Auth->>Redis: GET state:{nonce} — verify state
+    Redis-->>Auth: State valid
+    Auth->>OIDC: POST /token (exchange code)
+    OIDC-->>Auth: id_token + access_token
+    Auth->>Auth: Verify id_token signature (JWKS)
+    Auth->>DB: UPSERT users (email, provider, sub)
+    DB-->>Auth: User record
+    Auth->>Vault: GET secret/jwt-signing-key
+    Vault-->>Auth: RSA private key
+    Auth->>Auth: Sign JWT (RS256, exp: 15min)
+    Auth->>Auth: Sign Refresh Token (exp: 7d)
+    Auth->>Redis: SETEX refresh:{userId} 7d token_hash
+    Auth-->>Browser: Set-Cookie: refresh_token (httpOnly, secure, sameSite=strict)
+    Auth-->>Browser: 200 OK — {access_token, expires_in}
+
+    Note over User,OIDC: 🔄 Token Refresh Flow
+
+    Browser->>Kong: POST /auth/refresh (Cookie: refresh_token)
+    Kong->>Auth: Forward
+    Auth->>Redis: GET refresh:{userId}
+    Redis-->>Auth: Token hash match
+    Auth->>Vault: GET secret/jwt-signing-key
+    Vault-->>Auth: RSA private key
+    Auth->>Auth: Issue new access_token (RS256)
+    Auth-->>Browser: 200 OK — {access_token}
+
+    Note over User,OIDC: 🛡️ API Request with JWT
+
+    Browser->>Kong: GET /api/orders (Authorization: Bearer <jwt>)
+    Kong->>Kong: Verify JWT signature (RS256 public key)
+    Kong->>Kong: Check exp, iss, aud claims
+    Kong->>Kong: Rate limit by userId
+    Kong-->>Browser: 401 if invalid/expired
+    Kong->>Auth: Introspect token (optional, cached)
+    Auth-->>Kong: Token valid, scopes: [read:orders]
+    Kong->>Kong: Inject X-User-ID, X-User-Email headers
+    Kong->>Order: Forward with user context

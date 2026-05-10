@@ -1,0 +1,203 @@
+# ============================================================
+# Payment Service — Base Kubernetes Manifests
+# Go service — PCI-DSS isolated, dedicated node group
+# ============================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-service
+  namespace: nexacommerce-prod
+  labels:
+    app: payment-service
+    version: v1
+    team: payments
+    pci-scope: "true"
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/nexacommerce-prod-payment-service-role"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: nexacommerce-prod
+  labels:
+    app: payment-service
+    version: v1
+    team: payments
+    pci-scope: "true"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: v1
+        team: payments
+        pci-scope: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "payment-service"
+        # Audit all payment pod events
+        audit.nexacommerce.io/enabled: "true"
+    spec:
+      serviceAccountName: payment-service
+      # PCI-DSS: Run on dedicated payment nodes only
+      nodeSelector:
+        workload-type: payment-pci
+      tolerations:
+        - key: payment-pci
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [payment-service]
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: payment-service
+          image: REGISTRY/nexacommerce/payment-service:IMAGE_TAG
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8085
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: PORT
+              value: "8085"
+            - name: ENV
+              value: "production"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: payment-service-config
+            - secretRef:
+                name: payment-service-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8085
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: nexacommerce-prod
+  labels:
+    app: payment-service
+    pci-scope: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: payment-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8085
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-service
+  namespace: nexacommerce-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-service
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-service-pdb
+  namespace: nexacommerce-prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: payment-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-service-config
+  namespace: nexacommerce-prod
+data:
+  PAYMENT_PROVIDER: "stripe"
+  STRIPE_API_VERSION: "2023-10-16"
+  PAYMENT_TIMEOUT_SECONDS: "30"
+  RETRY_MAX_ATTEMPTS: "3"
+  RETRY_BACKOFF_MS: "1000"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  # PCI-DSS: Never log card data
+  LOG_REDACT_FIELDS: "card_number,cvv,expiry"
+  KAFKA_TOPIC_PAYMENT_PROCESSED: "payment.processed"
+  METRICS_PORT: "9090"

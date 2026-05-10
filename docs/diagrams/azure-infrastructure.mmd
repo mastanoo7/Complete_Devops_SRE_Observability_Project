@@ -1,0 +1,111 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#0078D4',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#005A9E',
+    'lineColor': '#0078D4',
+    'clusterBkg': '#1a1a2e',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph TB
+    classDef azureService fill:#0078D4,stroke:#005A9E,color:#fff,rx:6
+    classDef azureNetwork fill:#773ADC,stroke:#5C2DB0,color:#fff,rx:6
+    classDef azureDB fill:#0064A5,stroke:#004E82,color:#fff,rx:6
+    classDef azureCompute fill:#00BCF2,stroke:#0099C6,color:#000,rx:6
+    classDef azureSecurity fill:#D13438,stroke:#A52729,color:#fff,rx:6
+    classDef azureStorage fill:#107C10,stroke:#0C5E0C,color:#fff,rx:6
+    classDef azureMonitor fill:#C239B3,stroke:#9A2D8E,color:#fff,rx:6
+    classDef internet fill:#1a1a2e,stroke:#0078D4,color:#0078D4,rx:6
+
+    INTERNET(["🌍 Internet Traffic"]):::internet
+
+    subgraph AZURE_GLOBAL ["🌐 Azure Global Services"]
+        AFD["🔀 Azure Front Door\nGlobal HTTP LB + WAF\nAnycast acceleration"]:::azureNetwork
+        DDOS["🛡️ Azure DDoS Protection\nStandard tier\nAdaptive tuning"]:::azureSecurity
+        DNS_AZURE["🔀 Azure DNS\nPrivate + Public zones\nGeo-routing"]:::azureNetwork
+    end
+
+    subgraph WEST_EUROPE ["📍 West Europe — Primary"]
+        subgraph VNET_WE ["🔒 VNet: 10.10.0.0/16"]
+            subgraph PUB_WE ["Public Subnet"]
+                APPGW["⚖️ Application Gateway v2\nWAF v2 + SSL offload\nAutoscaling"]:::azureNetwork
+            end
+
+            subgraph PRIV_WE ["Private Subnet"]
+                AKS_WE["☸️ Azure AKS 1.29\nSystem + User node pools\nStandard_D8s_v3"]:::azureCompute
+                VMSS["⚡ VMSS\nVirtual Machine Scale Sets\nSpot instances for batch"]:::azureCompute
+            end
+
+            subgraph DATA_WE ["Data Subnet"]
+                COSMOS_WE["🗄️ CosmosDB\nMulti-region write\nStrong consistency"]:::azureDB
+                REDIS_WE["⚡ Azure Cache Redis\nPremium P3\nGeo-replication"]:::azureDB
+                EVENTHUB["📨 Event Hubs\nKafka-compatible\n10 TU auto-inflate"]:::azureDB
+                POSTGRES_WE["🗄️ Azure DB PostgreSQL\nFlexible Server\nHA + Read replicas"]:::azureDB
+            end
+        end
+    end
+
+    subgraph EAST_US2 ["📍 East US 2 — Secondary"]
+        subgraph VNET_EU2 ["🔒 VNet: 10.11.0.0/16"]
+            APPGW_EU2["⚖️ App Gateway EU2\nFailover target"]:::azureNetwork
+            AKS_EU2["☸️ AKS East US 2\nStandby cluster"]:::azureCompute
+            COSMOS_EU2["🗄️ CosmosDB Replica\nAuto-failover\nRPO = 0"]:::azureDB
+            REDIS_EU2["⚡ Redis Replica\nGeo-replication"]:::azureDB
+        end
+    end
+
+    subgraph SHARED_AZURE ["🔧 Shared Azure Services"]
+        ACR["📦 Azure Container Registry\nGeo-replication\nVulnerability scanning"]:::azureStorage
+        BLOB["🪣 Azure Blob Storage\nRA-GRS replication\nCDN integration"]:::azureStorage
+        KEYVAULT["🔑 Azure Key Vault\nHSM-backed\nSoft delete + purge protection"]:::azureSecurity
+        AAD["👤 Azure AD + Workload Identity\nPod-level managed identity\nOIDC federation"]:::azureSecurity
+        DEFENDER["🛡️ Microsoft Defender\nFor Containers\nRuntime protection"]:::azureSecurity
+        MONITOR["📊 Azure Monitor\nContainer Insights\nLog Analytics"]:::azureMonitor
+        APPINSIGHTS["🔍 Application Insights\nAPM + Distributed tracing\nSmart detection"]:::azureMonitor
+        SERVICEBUS["📨 Service Bus\nPremium tier\nGeo-disaster recovery"]:::azureService
+        COGNITIVE["🤖 Cognitive Services\nProduct recommendations\nImage analysis"]:::azureService
+        SEARCH_AZ["🔍 Azure Cognitive Search\nSemantic search\nAI enrichment"]:::azureDB
+    end
+
+    subgraph POLICY_AZURE ["📋 Governance"]
+        POLICY["📋 Azure Policy\nCompliance enforcement\nCIS benchmark"]:::azureSecurity
+        BLUEPRINTS["📐 Azure Blueprints\nEnvironment templates\nLock assignments"]:::azureSecurity
+    end
+
+    INTERNET --> DNS_AZURE
+    DNS_AZURE --> AFD
+    AFD --> DDOS
+    DDOS --> APPGW
+    DDOS --> APPGW_EU2
+
+    APPGW --> AKS_WE
+    APPGW --> VMSS
+    APPGW_EU2 --> AKS_EU2
+
+    AKS_WE --> COSMOS_WE
+    AKS_WE --> REDIS_WE
+    AKS_WE --> EVENTHUB
+    AKS_WE --> POSTGRES_WE
+    AKS_WE --> SEARCH_AZ
+    AKS_WE --> SERVICEBUS
+    AKS_WE --> COGNITIVE
+
+    COSMOS_WE -.->|"Multi-region\nreplication"| COSMOS_EU2
+    REDIS_WE -.->|"Geo-replication"| REDIS_EU2
+
+    AKS_WE --> KEYVAULT
+    AAD --> AKS_WE
+    DEFENDER --> AKS_WE
+
+    AKS_WE --> MONITOR
+    AKS_WE --> APPINSIGHTS
+
+    ACR --> AKS_WE
+    ACR --> AKS_EU2
+    BLOB --> AFD
+
+    POLICY --> AKS_WE
+    POLICY --> AKS_EU2

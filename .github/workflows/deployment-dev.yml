@@ -1,0 +1,105 @@
+# ============================================================
+# GitHub Actions — DEV Deployment Pipeline
+# Auto-deploys to DEV on every merge to main
+# ============================================================
+
+name: Deploy DEV
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "kubernetes/overlays/dev/**"
+
+env:
+  REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}
+  ENVIRONMENT: dev
+
+jobs:
+  deploy-dev:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITOPS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name nexacommerce-dev \
+            --region us-east-1
+
+      - name: Update image tags in dev overlay
+        run: |
+          cd kubernetes/overlays/dev
+          # Update all image tags to current commit SHA
+          sed -i "s|newTag: .*|newTag: \"${{ env.IMAGE_TAG }}\"|g" kustomization.yaml
+
+      - name: Commit updated manifests
+        run: |
+          git config user.name "nexacommerce-bot"
+          git config user.email "bot@nexacommerce.com"
+          git add kubernetes/overlays/dev/kustomization.yaml
+          git diff --staged --quiet || git commit -m \
+            "chore(deploy/dev): update image tags to ${{ env.IMAGE_TAG }}"
+          git push
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd && sudo mv argocd /usr/local/bin/
+
+      - name: Sync ArgoCD DEV app
+        run: |
+          argocd login ${{ secrets.ARGOCD_SERVER }} \
+            --auth-token ${{ secrets.ARGOCD_TOKEN }} \
+            --grpc-web
+          argocd app sync nexacommerce-dev --prune --timeout 180
+
+      - name: Wait for deployment health
+        run: |
+          argocd app wait nexacommerce-dev \
+            --health --timeout 300
+
+      - name: Run smoke tests
+        run: |
+          bash scripts/testing/smoke-test.sh \
+            --env dev \
+            --base-url https://dev.nexacommerce.internal
+
+      - name: Notify success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_DEV }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "✅ DEV deployment succeeded — `${{ env.IMAGE_TAG }}`"
+            }
+
+      - name: Notify failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_DEV }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "❌ DEV deployment FAILED — `${{ env.IMAGE_TAG }}` — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View>"
+            }

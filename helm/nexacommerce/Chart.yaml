@@ -1,0 +1,66 @@
+# ============================================================
+# NexaCommerce Helm Chart — Chart.yaml
+# Umbrella chart for all microservices
+# ============================================================
+
+apiVersion: v2
+name: nexacommerce
+description: Enterprise ecommerce platform — all microservices
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - ecommerce
+  - microservices
+  - nexacommerce
+
+maintainers:
+  - name: Platform Team
+    email: platform@nexacommerce.com
+
+dependencies:
+  - name: frontend
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: frontend.enabled
+
+  - name: auth-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: authService.enabled
+
+  - name: product-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: productService.enabled
+
+  - name: cart-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: cartService.enabled
+
+  - name: order-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: orderService.enabled
+
+  - name: payment-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: paymentService.enabled
+
+  - name: inventory-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: inventoryService.enabled
+
+  - name: search-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: searchService.enabled
+
+  - name: notification-service
+    version: "1.0.0"
+    repository: "oci://REGISTRY/nexacommerce/charts"
+    condition: notificationService.enabled

@@ -1,0 +1,193 @@
+# ============================================================
+# OPA Gatekeeper — Constraint Templates & Constraints
+# Policy enforcement for Kubernetes resources
+# ============================================================
+
+---
+# ConstraintTemplate: Block NodePort services
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblocknoodeport
+  annotations:
+    description: "Blocks NodePort services in production"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockNodePort
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblocknoodeport
+
+        violation[{"msg": msg}] {
+          input.review.kind.kind == "Service"
+          input.review.object.spec.type == "NodePort"
+          msg := "NodePort services are not allowed in production. Use ClusterIP or LoadBalancer."
+        }
+---
+# Constraint: Apply NodePort block to production
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockNodePort
+metadata:
+  name: block-nodeport-production
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Service"]
+    namespaces: ["nexacommerce-prod"]
+---
+# ConstraintTemplate: Require specific labels
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+
+        violation[{"msg": msg, "details": {"missing_labels": missing}}] {
+          provided := {label | input.review.object.metadata.labels[label]}
+          required := {label | label := input.parameters.labels[_]}
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf("Missing required labels: %v", [missing])
+        }
+---
+# Constraint: Require labels on deployments
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-deployment-labels
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment"]
+    namespaces: ["nexacommerce-prod"]
+  parameters:
+    labels: ["app", "version", "team"]
+---
+# ConstraintTemplate: Container resource limits
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8scontainerlimits
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sContainerLimits
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            cpu:
+              type: string
+            memory:
+              type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8scontainerlimits
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          cpu_limit := container.resources.limits.cpu
+          units.parse_quantity(cpu_limit) > units.parse_quantity(input.parameters.cpu)
+          msg := sprintf("Container %v CPU limit %v exceeds maximum %v",
+            [container.name, cpu_limit, input.parameters.cpu])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          mem_limit := container.resources.limits.memory
+          units.parse_quantity(mem_limit) > units.parse_quantity(input.parameters.memory)
+          msg := sprintf("Container %v memory limit %v exceeds maximum %v",
+            [container.name, mem_limit, input.parameters.memory])
+        }
+---
+# Constraint: Max container limits
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sContainerLimits
+metadata:
+  name: container-max-limits
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["nexacommerce-prod"]
+  parameters:
+    cpu: "4"
+    memory: "8Gi"
+---
+# ConstraintTemplate: Allowed image registries
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedrepos
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRepos
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            repos:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedrepos
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          satisfied := [good | repo := input.parameters.repos[_]; good := startswith(container.image, repo)]
+          not any(satisfied)
+          msg := sprintf("Container image %v is from an unapproved registry", [container.image])
+        }
+---
+# Constraint: Only allow approved registries
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: allowed-registries
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["nexacommerce-prod"]
+  parameters:
+    repos:
+      - "123456789.dkr.ecr.us-east-1.amazonaws.com/nexacommerce/"
+      - "nexacommerce.azurecr.io/"
+      - "us-central1-docker.pkg.dev/nexacommerce/"
+      - "docker.io/istio/"
+      - "docker.io/prom/"
+      - "docker.io/grafana/"

@@ -1,0 +1,91 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#466BB0', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2E4A8A', 'lineColor': '#466BB0', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif'}}}%%
+
+graph TB
+    classDef istio fill:#466BB0,stroke:#2E4A8A,color:#fff,rx:6
+    classDef sidecar fill:#27ae60,stroke:#1e8449,color:#fff,rx:6
+    classDef policy fill:#e74c3c,stroke:#c0392b,color:#fff,rx:6
+    classDef traffic fill:#f39c12,stroke:#d68910,color:#fff,rx:6
+    classDef observe fill:#16a085,stroke:#117a65,color:#fff,rx:6
+    classDef service fill:#2c3e50,stroke:#1a252f,color:#fff,rx:6
+
+    subgraph CONTROL_PLANE ["🎛️ Istio Control Plane — istiod"]
+        PILOT["✈️ Pilot\nService discovery\nxDS config push\nTraffic rules"]:::istio
+        CITADEL["🔐 Citadel\nCertificate authority\nmTLS cert issuance\nSPIFFE/SVID"]:::istio
+        GALLEY["⚙️ Galley\nConfig validation\nMeshConfig mgmt"]:::istio
+        TELEMETRY["📊 Telemetry v2\nMetrics generation\nAccess logging"]:::istio
+    end
+
+    subgraph DATA_PLANE ["🔄 Data Plane — Envoy Sidecars"]
+
+        subgraph AUTH_POD ["🔐 Auth Service Pod"]
+            AUTH_APP["Auth App\n:8080"]:::service
+            AUTH_PROXY["Envoy Proxy\n:15001 (outbound)\n:15006 (inbound)"]:::sidecar
+        end
+
+        subgraph PRODUCT_POD ["📦 Product Service Pod"]
+            PROD_APP["Product App\n:8080"]:::service
+            PROD_PROXY["Envoy Proxy\nmTLS enforced\nCircuit breaker"]:::sidecar
+        end
+
+        subgraph ORDER_POD ["📋 Order Service Pod"]
+            ORDER_APP["Order App\n:8080"]:::service
+            ORDER_PROXY["Envoy Proxy\nRetry: 3x\nTimeout: 30s"]:::sidecar
+        end
+
+        subgraph PAYMENT_POD ["💳 Payment Service Pod"]
+            PAY_APP["Payment App\n:8080"]:::service
+            PAY_PROXY["Envoy Proxy\nStrict mTLS\nAudit logging"]:::sidecar
+        end
+    end
+
+    subgraph TRAFFIC_MGMT ["🔀 Traffic Management"]
+        VS_PRODUCT["📋 VirtualService\nproduct-service\nCanary: 10% v2"]:::traffic
+        DR_PRODUCT["📋 DestinationRule\nproduct-service\nLB: LEAST_CONN\nCircuit breaker"]:::traffic
+        VS_ORDER["📋 VirtualService\norder-service\nRetry: 3x\nTimeout: 30s"]:::traffic
+        GW_INGRESS["🔀 Gateway\nistio-ingress\nHTTPS:443\nHTTP→HTTPS redirect"]:::traffic
+    end
+
+    subgraph SECURITY_POLICIES ["🔒 Security Policies"]
+        PEER_AUTH["🔐 PeerAuthentication\nMesh-wide: STRICT\nmTLS enforced"]:::policy
+        AUTH_POLICY["🔐 AuthorizationPolicy\nAllow: product→order\nDeny: external→payment"]:::policy
+        REQUEST_AUTH["🔐 RequestAuthentication\nJWT validation\nIssuer: auth-service"]:::policy
+    end
+
+    subgraph OBSERVABILITY ["📊 Mesh Observability"]
+        KIALI["🕸️ Kiali\nService graph\nTraffic visualization"]:::observe
+        PROMETHEUS_ISTIO["📈 Prometheus\nIstio metrics\nenvoy_cluster_*"]:::observe
+        JAEGER_ISTIO["🔍 Jaeger\nTrace propagation\nB3 headers"]:::observe
+    end
+
+    PILOT --> AUTH_PROXY
+    PILOT --> PROD_PROXY
+    PILOT --> ORDER_PROXY
+    PILOT --> PAY_PROXY
+
+    CITADEL -.->|"Issue mTLS cert\nSPIFFE SVID"| AUTH_PROXY
+    CITADEL -.->|"Issue mTLS cert"| PROD_PROXY
+    CITADEL -.->|"Issue mTLS cert"| ORDER_PROXY
+    CITADEL -.->|"Issue mTLS cert"| PAY_PROXY
+
+    AUTH_APP <--> AUTH_PROXY
+    PROD_APP <--> PROD_PROXY
+    ORDER_APP <--> ORDER_PROXY
+    PAY_APP <--> PAY_PROXY
+
+    AUTH_PROXY <-->|"mTLS\nencrypted"| PROD_PROXY
+    PROD_PROXY <-->|"mTLS\nencrypted"| ORDER_PROXY
+    ORDER_PROXY <-->|"mTLS\nencrypted"| PAY_PROXY
+
+    VS_PRODUCT --> PROD_PROXY
+    DR_PRODUCT --> PROD_PROXY
+    VS_ORDER --> ORDER_PROXY
+    GW_INGRESS --> AUTH_PROXY
+
+    PEER_AUTH --> DATA_PLANE
+    AUTH_POLICY --> DATA_PLANE
+    REQUEST_AUTH --> DATA_PLANE
+
+    TELEMETRY --> PROMETHEUS_ISTIO
+    DATA_PLANE --> JAEGER_ISTIO
+    PROMETHEUS_ISTIO --> KIALI
+    JAEGER_ISTIO --> KIALI

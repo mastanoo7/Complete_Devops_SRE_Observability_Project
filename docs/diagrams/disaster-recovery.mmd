@@ -1,0 +1,93 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#c0392b', 'primaryTextColor': '#fff', 'primaryBorderColor': '#922b21', 'lineColor': '#e74c3c', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif'}}}%%
+
+graph TB
+    classDef primary fill:#27ae60,stroke:#1e8449,color:#fff,rx:6
+    classDef secondary fill:#f39c12,stroke:#d68910,color:#fff,rx:6
+    classDef dr fill:#c0392b,stroke:#922b21,color:#fff,rx:6
+    classDef monitor fill:#16a085,stroke:#117a65,color:#fff,rx:6
+    classDef action fill:#8e44ad,stroke:#6c3483,color:#fff,rx:6
+    classDef data fill:#2980b9,stroke:#1a5276,color:#fff,rx:6
+
+    subgraph NORMAL ["✅ Normal Operations — Active-Active"]
+        subgraph AWS_PRIMARY ["☁️ AWS — Primary (40%)"]
+            AWS_EKS_P["☸️ EKS Production\nus-east-1\nActive traffic"]:::primary
+            AWS_DB_P["🗄️ Aurora Writer\nus-east-1\nRPO: 0"]:::primary
+            AWS_REDIS_P["⚡ Redis Primary\nus-east-1"]:::primary
+        end
+
+        subgraph AZURE_SECONDARY ["☁️ Azure — Secondary (35%)"]
+            AZ_AKS_P["☸️ AKS Production\nwest-europe\nActive traffic"]:::primary
+            AZ_DB_P["🗄️ CosmosDB\nMulti-write\nRPO: 0"]:::primary
+            AZ_REDIS_P["⚡ Redis Premium\nwest-europe"]:::primary
+        end
+
+        subgraph GCP_TERTIARY ["☁️ GCP — Tertiary (25%)"]
+            GCP_GKE_P["☸️ GKE Production\nus-central1\nActive traffic"]:::primary
+            GCP_DB_P["🗄️ Cloud Spanner\nGlobal\nRPO: 0"]:::primary
+            GCP_REDIS_P["⚡ Memorystore\nus-central1"]:::primary
+        end
+
+        CF_LB["🌐 CloudFlare\nGlobal Traffic Manager\nHealth checks: 30s"]:::monitor
+    end
+
+    subgraph REPLICATION ["🔄 Cross-Cloud Data Replication"]
+        DB_SYNC["🔄 Database Sync\nAurora → CosmosDB\nAurora → Spanner\nDebezium CDC\nLag < 1s"]:::data
+        KAFKA_MIRROR["📨 Kafka MirrorMaker 2\nCross-cloud event sync\nLag monitoring"]:::data
+        REDIS_SYNC["⚡ Redis Cross-Replication\nActive-passive\nRTO: 30s"]:::data
+    end
+
+    subgraph FAILURE_SCENARIOS ["⚠️ Failure Scenarios & RTO/RPO"]
+
+        subgraph SCENARIO_1 ["Scenario 1: AWS Region Failure"]
+            AWS_FAIL["❌ AWS us-east-1\nComplete failure\nDetected: < 30s"]:::dr
+            REROUTE_1["🔀 CloudFlare Reroute\nAWS traffic → Azure + GCP\nAzure: 60%, GCP: 40%\nRTO: < 60s"]:::action
+        end
+
+        subgraph SCENARIO_2 ["Scenario 2: Database Failure"]
+            DB_FAIL["❌ Aurora Primary\nFailure detected\nDetected: < 10s"]:::dr
+            DB_FAILOVER["🔄 Aurora Failover\nPromotion: < 30s\nRead replica → Writer\nRPO: < 5s"]:::action
+            GLOBAL_FAILOVER["🔄 Global DB Failover\nRoute to CosmosDB\nRTO: < 60s, RPO: < 1s"]:::action
+        end
+
+        subgraph SCENARIO_3 ["Scenario 3: Full Cloud Outage"]
+            CLOUD_FAIL["❌ AWS + Azure\nSimultaneous failure\nExtreme scenario"]:::dr
+            GCP_FULL["🔄 GCP Takes 100%\nAuto-scale: 2x nodes\nRTO: < 5min\nRPO: < 30s"]:::action
+        end
+    end
+
+    subgraph RECOVERY_PROCEDURES ["🔧 Recovery Procedures"]
+        RUNBOOK_1["📋 Runbook: Cluster Failure\nrunbooks/cluster-failure.md\nAuto-trigger: PagerDuty"]:::action
+        RUNBOOK_2["📋 Runbook: DB Failover\nrunbooks/database-failover.md\nAuto-trigger: CloudWatch"]:::action
+        CHAOS_TEST["🔥 Chaos Testing\nLitmusChaos weekly\nGameDay monthly\nDR drill quarterly"]:::action
+    end
+
+    subgraph SLO_TARGETS ["🎯 DR Targets"]
+        RTO["⏱️ RTO Targets\nSingle AZ: < 30s\nSingle Region: < 5min\nFull Cloud: < 15min"]:::monitor
+        RPO["💾 RPO Targets\nDatabase: < 1s\nCache: < 30s\nObject Store: < 5min"]:::monitor
+        UPTIME["📊 Uptime Target\n99.99% = 52min/year\nMeasured per service\nError budget tracked"]:::monitor
+    end
+
+    CF_LB --> AWS_EKS_P
+    CF_LB --> AZ_AKS_P
+    CF_LB --> GCP_GKE_P
+
+    AWS_DB_P --> DB_SYNC
+    DB_SYNC --> AZ_DB_P
+    DB_SYNC --> GCP_DB_P
+
+    AWS_EKS_P --> KAFKA_MIRROR
+    KAFKA_MIRROR --> AZ_AKS_P
+    KAFKA_MIRROR --> GCP_GKE_P
+
+    AWS_REDIS_P --> REDIS_SYNC
+    REDIS_SYNC --> AZ_REDIS_P
+    REDIS_SYNC --> GCP_REDIS_P
+
+    AWS_FAIL --> REROUTE_1
+    DB_FAIL --> DB_FAILOVER
+    DB_FAILOVER --> GLOBAL_FAILOVER
+    CLOUD_FAIL --> GCP_FULL
+
+    REROUTE_1 --> RUNBOOK_1
+    GLOBAL_FAILOVER --> RUNBOOK_2
+    GCP_FULL --> CHAOS_TEST

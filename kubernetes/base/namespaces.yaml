@@ -1,0 +1,69 @@
+# ============================================================
+# Kubernetes Base — Namespace Definitions
+# All namespaces for the NexaCommerce platform
+# ============================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexacommerce-prod
+  labels:
+    name: nexacommerce-prod
+    environment: production
+    istio-injection: enabled
+    team: platform
+  annotations:
+    description: "NexaCommerce production workloads"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexacommerce-staging
+  labels:
+    name: nexacommerce-staging
+    environment: staging
+    istio-injection: enabled
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexacommerce-dev
+  labels:
+    name: nexacommerce-dev
+    environment: development
+    istio-injection: enabled
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  labels:
+    name: logging
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    name: security
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong
+  labels:
+    name: kong
+    team: platform

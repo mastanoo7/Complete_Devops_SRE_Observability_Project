@@ -1,0 +1,158 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#326CE5',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#2150B0',
+    'lineColor': '#326CE5',
+    'clusterBkg': '#0d1117',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph TB
+    classDef k8sCore fill:#326CE5,stroke:#2150B0,color:#fff,rx:6
+    classDef istio fill:#466BB0,stroke:#2E4A8A,color:#fff,rx:6
+    classDef service fill:#27ae60,stroke:#1e8449,color:#fff,rx:6
+    classDef infra fill:#8e44ad,stroke:#6c3483,color:#fff,rx:6
+    classDef monitoring fill:#16a085,stroke:#117a65,color:#fff,rx:6
+    classDef security fill:#c0392b,stroke:#922b21,color:#fff,rx:6
+    classDef storage fill:#d35400,stroke:#a04000,color:#fff,rx:6
+    classDef external fill:#2c3e50,stroke:#1a252f,color:#fff,rx:6
+
+    subgraph CLUSTER ["☸️ Kubernetes Cluster — Production"]
+
+        subgraph CONTROL_PLANE ["🎛️ Control Plane (Managed)"]
+            API_SERVER["🔌 API Server\nkube-apiserver\nHA: 3 replicas"]:::k8sCore
+            ETCD["🗄️ etcd\nHA: 3 nodes\nEncrypted at rest"]:::k8sCore
+            SCHEDULER["📅 Scheduler\nkube-scheduler\nCustom profiles"]:::k8sCore
+            CM["⚙️ Controller Manager\nkube-controller-manager"]:::k8sCore
+        end
+
+        subgraph SYSTEM_NS ["📦 kube-system Namespace"]
+            CNI["🔌 Cilium CNI\neBPF networking\nNetwork policies"]:::infra
+            COREDNS["🔀 CoreDNS\nService discovery\n3 replicas"]:::infra
+            METRICS["📊 Metrics Server\nHPA/VPA support"]:::infra
+            CLUSTER_AUTOSCALER["⚡ Cluster Autoscaler\nNode group scaling\n2-50 nodes"]:::infra
+        end
+
+        subgraph ISTIO_NS ["🕸️ istio-system Namespace"]
+            ISTIOD["🕸️ Istiod\nControl plane\nPilot + Citadel + Galley"]:::istio
+            INGRESS_GW["🔀 Istio Ingress GW\nExternal traffic entry\nSSL termination"]:::istio
+            EGRESS_GW["🔀 Istio Egress GW\nControlled egress\nPolicy enforcement"]:::istio
+        end
+
+        subgraph KONG_NS ["🔀 kong Namespace"]
+            KONG_GW["🔀 Kong Gateway\nAPI management\nRate limiting + Auth"]:::service
+            KONG_ADMIN["⚙️ Kong Admin API\nConfiguration\nPlugin management"]:::service
+        end
+
+        subgraph ARGOCD_NS ["🔄 argocd Namespace"]
+            ARGO_SERVER["🔄 ArgoCD Server\nGitOps controller\nUI + API"]:::infra
+            ARGO_REPO["📁 Repo Server\nGit sync\nHelm + Kustomize"]:::infra
+            ARGO_APP["📋 App Controller\nReconciliation loop\nHealth checks"]:::infra
+        end
+
+        subgraph PROD_NS ["🏭 production Namespace"]
+            subgraph FRONTEND_PODS ["Frontend"]
+                NEXT_JS["🌐 Next.js\n3 replicas\nHPA: 3-20"]:::service
+            end
+
+            subgraph AUTH_PODS ["Auth"]
+                AUTH_SVC["🔐 Auth Service\n3 replicas\nHPA: 3-15"]:::service
+            end
+
+            subgraph CATALOG_PODS ["Catalog"]
+                PRODUCT_SVC["📦 Product Service\n3 replicas\nHPA: 3-20"]:::service
+            end
+
+            subgraph CART_PODS ["Cart"]
+                CART_SVC["🛒 Cart Service\n3 replicas\nHPA: 3-15"]:::service
+            end
+
+            subgraph ORDER_PODS ["Orders"]
+                ORDER_SVC["📋 Order Service\n3 replicas\nHPA: 3-15"]:::service
+            end
+
+            subgraph PAYMENT_PODS ["Payment"]
+                PAYMENT_SVC["💳 Payment Service\n3 replicas\nHPA: 3-10"]:::service
+            end
+
+            subgraph SEARCH_PODS ["Search"]
+                SEARCH_SVC["🔍 Search Service\n3 replicas\nHPA: 3-20"]:::service
+            end
+
+            subgraph NOTIFY_PODS ["Notifications"]
+                NOTIFY_SVC["🔔 Notify Service\n2 replicas\nHPA: 2-10"]:::service
+            end
+        end
+
+        subgraph MONITORING_NS ["📊 monitoring Namespace"]
+            PROMETHEUS["📈 Prometheus\nHA pair\n30-day retention"]:::monitoring
+            GRAFANA["📊 Grafana\n2 replicas\nSSO enabled"]:::monitoring
+            ALERTMANAGER["🚨 AlertManager\nHA: 3 replicas\nPagerDuty integration"]:::monitoring
+            LOKI["📝 Loki\nDistributed mode\nS3 backend"]:::monitoring
+            TEMPO["🔍 Tempo\nDistributed tracing\nS3 backend"]:::monitoring
+        end
+
+        subgraph SECURITY_NS ["🔒 security Namespace"]
+            VAULT_AGENT["🔑 Vault Agent\nSidecar injector\nSecret sync"]:::security
+            FALCO_DS["👁️ Falco DaemonSet\nRuntime security\nSyscall monitoring"]:::security
+            KYVERNO["📋 Kyverno\nPolicy engine\nAdmission webhook"]:::security
+            OPA["📋 OPA Gatekeeper\nConstraint templates\nPolicy enforcement"]:::security
+        end
+
+        subgraph STORAGE_NS ["💾 Storage"]
+            PVC_FAST["💾 Fast SSD PVCs\ngp3 / Premium SSD\nDatabase volumes"]:::storage
+            PVC_STD["💾 Standard PVCs\ngp2 / Standard SSD\nLog volumes"]:::storage
+        end
+
+    end
+
+    subgraph EXTERNAL ["🌐 External"]
+        GITHUB["📁 GitHub\nSource of truth\nGitOps repo"]:::external
+        VAULT_EXT["🔑 HashiCorp Vault\nExternal secrets\nPKI + KV"]:::external
+        REGISTRY["📦 Container Registry\nECR / ACR / AR\nSigned images"]:::external
+    end
+
+    API_SERVER --> ETCD
+    API_SERVER --> SCHEDULER
+    API_SERVER --> CM
+
+    CNI --> PROD_NS
+    COREDNS --> PROD_NS
+    CLUSTER_AUTOSCALER --> CONTROL_PLANE
+
+    INGRESS_GW --> KONG_GW
+    KONG_GW --> ISTIOD
+    ISTIOD -.->|"mTLS sidecar\ninjection"| PROD_NS
+
+    KONG_GW --> NEXT_JS
+    KONG_GW --> AUTH_SVC
+    NEXT_JS --> PRODUCT_SVC
+    NEXT_JS --> CART_SVC
+    CART_SVC --> ORDER_SVC
+    ORDER_SVC --> PAYMENT_SVC
+    ORDER_SVC --> NOTIFY_SVC
+    PRODUCT_SVC --> SEARCH_SVC
+
+    PROD_NS --> PROMETHEUS
+    PROMETHEUS --> GRAFANA
+    PROMETHEUS --> ALERTMANAGER
+    PROD_NS --> LOKI
+    PROD_NS --> TEMPO
+
+    VAULT_AGENT --> PROD_NS
+    FALCO_DS --> PROD_NS
+    KYVERNO --> API_SERVER
+    OPA --> API_SERVER
+
+    GITHUB --> ARGO_REPO
+    ARGO_REPO --> ARGO_APP
+    ARGO_APP --> PROD_NS
+
+    REGISTRY --> PROD_NS
+    VAULT_EXT --> VAULT_AGENT
+
+    PROD_NS --> PVC_FAST
+    PROD_NS --> PVC_STD

@@ -1,0 +1,179 @@
+# ============================================================
+# Alertmanager — Production Configuration
+# Routes alerts to PagerDuty, Slack, and OpsGenie
+# ============================================================
+
+global:
+  resolve_timeout: 5m
+  slack_api_url: "https://hooks.slack.com/services/PLACEHOLDER"
+  pagerduty_url: "https://events.pagerduty.com/v2/enqueue"
+
+# ── Templates ─────────────────────────────────────────────
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+# ── Routing Tree ──────────────────────────────────────────
+route:
+  group_by: [alertname, cluster, service, namespace]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: slack-default
+
+  routes:
+    # ── Critical: PagerDuty + Slack ──────────────────────
+    - match:
+        severity: critical
+      receiver: pagerduty-critical
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      routes:
+        # Payment service: highest priority
+        - match:
+            service: payment-service
+          receiver: pagerduty-payment
+          group_wait: 0s
+          repeat_interval: 30m
+
+        # SLO breaches: dedicated channel
+        - match:
+            slo: availability
+          receiver: pagerduty-slo
+          group_wait: 10s
+
+    # ── Warning: Slack only ───────────────────────────────
+    - match:
+        severity: warning
+      receiver: slack-warnings
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 6h
+
+    # ── Error budget: dedicated channel ──────────────────
+    - match:
+        alerttype: error-budget
+      receiver: slack-error-budget
+      group_wait: 30s
+      repeat_interval: 2h
+
+    # ── Business alerts: product team ────────────────────
+    - match:
+        team: orders
+      receiver: slack-orders-team
+    - match:
+        team: payments
+      receiver: slack-payments-team
+    - match:
+        team: product
+      receiver: slack-product-team
+
+    # ── Infrastructure: platform team ────────────────────
+    - match_re:
+        alertname: "(Node|Pod|Deployment|Aurora|Redis).*"
+      receiver: slack-platform
+
+# ── Inhibition Rules ──────────────────────────────────────
+inhibit_rules:
+  # Suppress warning if critical is already firing for same service
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: [alertname, service, namespace]
+
+  # Suppress all alerts if cluster is down
+  - source_match:
+      alertname: KubernetesClusterDown
+    target_match_re:
+      alertname: ".*"
+    equal: [cluster]
+
+# ── Receivers ─────────────────────────────────────────────
+receivers:
+  - name: slack-default
+    slack_configs:
+      - channel: "#alerts-general"
+        send_resolved: true
+        title: '{{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        color: '{{ template "slack.color" . }}'
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "{{ .ExternalURL }}"
+        service_key_file: /etc/alertmanager/secrets/pagerduty-key
+        description: '{{ template "pagerduty.description" . }}'
+        severity: critical
+        details:
+          cluster: "{{ .CommonLabels.cluster }}"
+          service: "{{ .CommonLabels.service }}"
+          runbook: "{{ .CommonAnnotations.runbook }}"
+    slack_configs:
+      - channel: "#alerts-critical"
+        send_resolved: true
+        title: '🚨 CRITICAL: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        color: danger
+
+  - name: pagerduty-payment
+    pagerduty_configs:
+      - routing_key: "{{ .ExternalURL }}"
+        service_key_file: /etc/alertmanager/secrets/pagerduty-payment-key
+        severity: critical
+    slack_configs:
+      - channel: "#alerts-payment-critical"
+        send_resolved: true
+        title: '💳 PAYMENT ALERT: {{ template "slack.title" . }}'
+        color: danger
+
+  - name: pagerduty-slo
+    pagerduty_configs:
+      - routing_key: "{{ .ExternalURL }}"
+        service_key_file: /etc/alertmanager/secrets/pagerduty-slo-key
+        severity: critical
+    slack_configs:
+      - channel: "#alerts-slo"
+        send_resolved: true
+        title: '📊 SLO BREACH: {{ template "slack.title" . }}'
+        color: danger
+
+  - name: slack-warnings
+    slack_configs:
+      - channel: "#alerts-warning"
+        send_resolved: true
+        title: '⚠️ WARNING: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        color: warning
+
+  - name: slack-error-budget
+    slack_configs:
+      - channel: "#sre-error-budget"
+        send_resolved: true
+        title: '📉 Error Budget: {{ template "slack.title" . }}'
+        color: warning
+
+  - name: slack-platform
+    slack_configs:
+      - channel: "#platform-alerts"
+        send_resolved: true
+        title: '🔧 Platform: {{ template "slack.title" . }}'
+        color: '{{ template "slack.color" . }}'
+
+  - name: slack-orders-team
+    slack_configs:
+      - channel: "#team-orders-alerts"
+        send_resolved: true
+        title: '📋 Orders: {{ template "slack.title" . }}'
+
+  - name: slack-payments-team
+    slack_configs:
+      - channel: "#team-payments-alerts"
+        send_resolved: true
+        title: '💳 Payments: {{ template "slack.title" . }}'
+
+  - name: slack-product-team
+    slack_configs:
+      - channel: "#team-product-alerts"
+        send_resolved: true
+        title: '📦 Product: {{ template "slack.title" . }}'

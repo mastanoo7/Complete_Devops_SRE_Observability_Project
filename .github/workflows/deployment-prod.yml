@@ -1,0 +1,211 @@
+# ============================================================
+# GitHub Actions — Production Deployment Pipeline
+# Canary deployment with automated rollback
+# ============================================================
+
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. sha-abc1234)"
+        required: true
+        type: string
+      services:
+        description: "Services to deploy (comma-separated, or 'all')"
+        required: false
+        default: "all"
+        type: string
+      canary_weight:
+        description: "Initial canary traffic percentage"
+        required: false
+        default: "5"
+        type: string
+
+env:
+  ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+  ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_DEPLOYMENTS }}
+
+jobs:
+  # ── Pre-deployment Checks ────────────────────────────────
+  pre-deploy-checks:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify image exists in ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name nexacommerce/auth-service \
+            --image-ids imageTag=${{ inputs.image_tag }} \
+            --region us-east-1
+
+      - name: Check SLO compliance (last 24h)
+        run: |
+          bash scripts/sre/check-slos.sh \
+            --threshold 99.9 \
+            --window 24h \
+            --fail-on-breach
+
+      - name: Check error budget
+        run: |
+          bash scripts/sre/check-error-budget.sh \
+            --min-remaining 10
+
+      - name: Verify no active incidents
+        run: |
+          bash scripts/sre/check-incidents.sh \
+            --severity P1,P2 \
+            --fail-if-active
+
+      - name: Notify deployment start
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ env.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "🚀 *Production deployment starting*",
+              "blocks": [{
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "🚀 *Production Deployment*\n*Tag:* `${{ inputs.image_tag }}`\n*Services:* ${{ inputs.services }}\n*Initiated by:* ${{ github.actor }}"
+                }
+              }]
+            }
+
+  # ── Update GitOps Manifests ──────────────────────────────
+  update-manifests:
+    name: Update GitOps Manifests
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITOPS_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "nexacommerce-bot"
+          git config user.email "bot@nexacommerce.com"
+
+      - name: Update image tags in prod overlay
+        run: |
+          SERVICES="${{ inputs.services }}"
+          TAG="${{ inputs.image_tag }}"
+
+          if [ "$SERVICES" = "all" ]; then
+            SERVICES="frontend auth-service product-service cart-service order-service payment-service inventory-service search-service notification-service"
+          fi
+
+          for SVC in $SERVICES; do
+            sed -i "s|newTag: .*|newTag: \"$TAG\"|g" \
+              kubernetes/overlays/prod/kustomization.yaml
+          done
+
+      - name: Commit and push manifest update
+        run: |
+          git add kubernetes/overlays/prod/kustomization.yaml
+          git commit -m "chore(deploy): bump prod image tags to ${{ inputs.image_tag }}
+
+          Services: ${{ inputs.services }}
+          Deployed by: ${{ github.actor }}
+          Workflow: ${{ github.run_id }}"
+          git push
+
+  # ── Canary Deployment ────────────────────────────────────
+  canary-deploy:
+    name: Canary Deployment (${{ inputs.canary_weight }}%)
+    runs-on: ubuntu-latest
+    needs: update-manifests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd && sudo mv argocd /usr/local/bin/
+
+      - name: Login to ArgoCD
+        run: |
+          argocd login ${{ env.ARGOCD_SERVER }} \
+            --auth-token ${{ env.ARGOCD_TOKEN }} \
+            --grpc-web
+
+      - name: Sync ArgoCD application
+        run: |
+          argocd app sync nexacommerce-prod \
+            --prune \
+            --timeout 300
+
+      - name: Wait for rollout
+        run: |
+          argocd app wait nexacommerce-prod \
+            --health \
+            --timeout 300
+
+      - name: Monitor canary metrics (10 minutes)
+        run: |
+          bash scripts/deployment/monitor-canary.sh \
+            --duration 600 \
+            --error-rate-threshold 0.01 \
+            --latency-p99-threshold 500 \
+            --namespace nexacommerce-prod
+
+  # ── Promote or Rollback ──────────────────────────────────
+  promote-or-rollback:
+    name: Promote or Rollback
+    runs-on: ubuntu-latest
+    needs: canary-deploy
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check canary health
+        id: canary-check
+        run: |
+          bash scripts/deployment/check-canary-health.sh \
+            --namespace nexacommerce-prod \
+            --tag ${{ inputs.image_tag }}
+          echo "healthy=$?" >> $GITHUB_OUTPUT
+
+      - name: Promote to 100%
+        if: steps.canary-check.outputs.healthy == '0'
+        run: |
+          echo "✅ Canary healthy — promoting to 100%"
+          bash scripts/deployment/promote-canary.sh \
+            --namespace nexacommerce-prod \
+            --tag ${{ inputs.image_tag }}
+
+      - name: Rollback on failure
+        if: steps.canary-check.outputs.healthy != '0'
+        run: |
+          echo "❌ Canary unhealthy — rolling back"
+          argocd app rollback nexacommerce-prod
+          bash scripts/deployment/notify-rollback.sh \
+            --tag ${{ inputs.image_tag }} \
+            --reason "Canary health check failed"
+
+      - name: Notify deployment result
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ env.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ steps.canary-check.outputs.healthy == '0' && '✅ Production deployment succeeded' || '❌ Production deployment FAILED — rolled back' }}",
+              "blocks": [{
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "${{ steps.canary-check.outputs.healthy == '0' && '✅' || '❌' }} *Production Deployment ${{ steps.canary-check.outputs.healthy == '0' && 'Succeeded' || 'FAILED' }}*\n*Tag:* `${{ inputs.image_tag }}`\n*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View>"
+                }
+              }]
+            }

@@ -1,0 +1,150 @@
+# ============================================================
+# Prometheus — Recording Rules
+# Pre-computed metrics for dashboard performance
+# ============================================================
+
+groups:
+  # ── Service-level aggregations ───────────────────────────
+  - name: recording.service_metrics
+    interval: 30s
+    rules:
+      # Request rate per service
+      - record: job:http_requests_total:rate5m
+        expr: |
+          sum(rate(http_requests_total[5m])) by (service, namespace)
+
+      # Error rate per service
+      - record: job:http_errors_total:rate5m
+        expr: |
+          sum(rate(http_requests_total{code=~"5.."}[5m])) by (service, namespace)
+
+      # Error ratio per service
+      - record: job:http_error_ratio:rate5m
+        expr: |
+          job:http_errors_total:rate5m
+          /
+          job:http_requests_total:rate5m
+
+      # P50 latency per service
+      - record: job:http_request_duration_seconds:p50
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(http_request_duration_seconds_bucket[5m]))
+            by (le, service, namespace)
+          )
+
+      # P95 latency per service
+      - record: job:http_request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m]))
+            by (le, service, namespace)
+          )
+
+      # P99 latency per service
+      - record: job:http_request_duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m]))
+            by (le, service, namespace)
+          )
+
+  # ── SLO calculations ─────────────────────────────────────
+  - name: recording.slo
+    interval: 60s
+    rules:
+      # 5-minute availability window
+      - record: slo:availability:ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{namespace="nexacommerce-prod", code!~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{namespace="nexacommerce-prod"}[5m]))
+
+      # 1-hour availability window
+      - record: slo:availability:ratio_rate1h
+        expr: |
+          sum(rate(http_requests_total{namespace="nexacommerce-prod", code!~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{namespace="nexacommerce-prod"}[1h]))
+
+      # 24-hour availability window
+      - record: slo:availability:ratio_rate24h
+        expr: |
+          sum(rate(http_requests_total{namespace="nexacommerce-prod", code!~"5.."}[24h]))
+          /
+          sum(rate(http_requests_total{namespace="nexacommerce-prod"}[24h]))
+
+      # 30-day availability window
+      - record: slo:availability:ratio_rate30d
+        expr: |
+          sum(rate(http_requests_total{namespace="nexacommerce-prod", code!~"5.."}[30d]))
+          /
+          sum(rate(http_requests_total{namespace="nexacommerce-prod"}[30d]))
+
+      # Error budget consumed (30d, target 99.9%)
+      - record: slo:error_budget_consumed:ratio_rate30d
+        expr: |
+          1 - (
+            (1 - slo:availability:ratio_rate30d)
+            /
+            (1 - 0.999)
+          )
+
+      # Per-service availability (5m)
+      - record: slo:service_availability:ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{namespace="nexacommerce-prod", code!~"5.."}[5m])) by (service)
+          /
+          sum(rate(http_requests_total{namespace="nexacommerce-prod"}[5m])) by (service)
+
+  # ── Infrastructure aggregations ──────────────────────────
+  - name: recording.infrastructure
+    interval: 60s
+    rules:
+      # CPU utilization per node
+      - record: node:cpu_utilization:ratio
+        expr: |
+          1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance)
+
+      # Memory utilization per node
+      - record: node:memory_utilization:ratio
+        expr: |
+          1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+
+      # Pod CPU utilization
+      - record: pod:cpu_usage:rate5m
+        expr: |
+          sum(rate(container_cpu_usage_seconds_total{namespace=~"nexacommerce-.*", container!=""}[5m]))
+          by (pod, namespace, container)
+
+      # Pod memory utilization
+      - record: pod:memory_usage:bytes
+        expr: |
+          sum(container_memory_working_set_bytes{namespace=~"nexacommerce-.*", container!=""})
+          by (pod, namespace, container)
+
+  # ── Business metrics ─────────────────────────────────────
+  - name: recording.business
+    interval: 60s
+    rules:
+      # Orders per minute
+      - record: business:orders_per_minute:rate5m
+        expr: |
+          sum(rate(orders_total[5m])) * 60
+
+      # Revenue per minute (estimated)
+      - record: business:revenue_per_minute:rate5m
+        expr: |
+          sum(rate(payment_amount_total{status="success"}[5m])) * 60
+
+      # Checkout conversion rate
+      - record: business:checkout_conversion:ratio_rate1h
+        expr: |
+          sum(rate(checkout_completed_total[1h]))
+          /
+          sum(rate(checkout_started_total[1h]))
+
+      # Active users (unique sessions in last 5m)
+      - record: business:active_users:count5m
+        expr: |
+          count(count by (session_id) (http_requests_total{service="frontend"}))

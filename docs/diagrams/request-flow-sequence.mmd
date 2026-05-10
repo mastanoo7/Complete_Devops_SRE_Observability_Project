@@ -1,0 +1,78 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#326CE5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2150B0', 'lineColor': '#4a9eff', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif', 'actorBkg': '#16213e', 'actorBorder': '#4a9eff', 'actorTextColor': '#fff', 'activationBkgColor': '#0f3460', 'activationBorderColor': '#4a9eff', 'noteBkgColor': '#1a1a2e', 'noteTextColor': '#fff'}}}%%
+
+sequenceDiagram
+    actor User as 🌍 User (Browser)
+    participant CF as 🌐 CloudFlare<br/>CDN + WAF
+    participant ALB as ⚖️ AWS ALB
+    participant Kong as 🔀 Kong Gateway
+    participant Istio as 🕸️ Istio Sidecar
+    participant Auth as 🔐 Auth Service
+    participant FE as 🌐 Next.js Frontend
+    participant Product as 📦 Product Service
+    participant Cart as 🛒 Cart Service
+    participant Order as 📋 Order Service
+    participant Payment as 💳 Payment Service
+    participant Inventory as 📊 Inventory Service
+    participant Notify as 🔔 Notify Service
+    participant Kafka as 📨 Kafka
+    participant DB as 🗄️ Aurora PostgreSQL
+    participant Redis as ⚡ Redis Cache
+    participant Jaeger as 🔍 Jaeger Tracing
+
+    Note over User,Jaeger: 🛒 Customer Purchase Flow — Distributed Trace ID: trace-abc-123
+
+    User->>CF: GET /products?q=laptop (HTTPS)
+    CF->>CF: WAF check, DDoS filter, Cache lookup
+    CF->>ALB: Forward request (X-Forwarded-For)
+    ALB->>Kong: Route to Kong (TLS terminated)
+    Kong->>Kong: Rate limit check (1000 req/min)
+    Kong->>Kong: JWT validation (Bearer token)
+    Kong->>Istio: Forward with trace headers
+    Istio->>Istio: mTLS handshake, inject trace span
+    Istio->>Auth: Validate token (gRPC)
+    Auth->>Redis: Check token cache
+    Redis-->>Auth: Token valid (cache hit)
+    Auth-->>Istio: 200 OK — user: john@example.com
+    Istio->>FE: Authenticated request
+    FE->>Product: GET /api/products?q=laptop
+    Product->>Redis: Check product cache
+    Redis-->>Product: Cache miss
+    Product->>DB: SELECT * FROM products WHERE...
+    DB-->>Product: 24 results
+    Product->>Redis: Cache results (TTL: 300s)
+    Product-->>FE: 200 OK — product list
+    FE-->>User: Render product page (SSR)
+    FE->>Jaeger: Export trace span
+
+    Note over User,Jaeger: 🛒 Add to Cart
+
+    User->>Kong: POST /cart/items {productId, qty}
+    Kong->>Istio: Forward authenticated
+    Istio->>Cart: POST /items
+    Cart->>Redis: HSET cart:{userId} product:123 qty:1
+    Redis-->>Cart: OK
+    Cart-->>User: 200 OK — cart updated
+
+    Note over User,Jaeger: 💳 Checkout & Payment
+
+    User->>Kong: POST /orders/checkout
+    Kong->>Istio: Forward
+    Istio->>Order: POST /checkout
+    Order->>Cart: GET /cart/{userId}
+    Cart->>Redis: HGETALL cart:{userId}
+    Redis-->>Cart: Cart items
+    Cart-->>Order: Cart data
+    Order->>Inventory: POST /reserve {items}
+    Inventory->>DB: BEGIN TRANSACTION — reserve stock
+    DB-->>Inventory: Stock reserved
+    Inventory-->>Order: Reservation confirmed
+    Order->>Payment: POST /charge {amount, card}
+    Payment->>Payment: Tokenize card (Stripe/Braintree)
+    Payment->>DB: INSERT payment_intents
+    Payment-->>Order: Payment authorized
+    Order->>DB: INSERT orders (status: confirmed)
+    Order->>Kafka: Publish order.created event
+    Kafka-->>Notify: Consume order.created
+    Notify->>Notify: Send confirmation email
+    Order-->>User: 201 Created — order #ORD-789
+    Order->>Jaeger: Export full trace (12 spans)

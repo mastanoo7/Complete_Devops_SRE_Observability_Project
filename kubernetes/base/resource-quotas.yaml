@@ -1,0 +1,59 @@
+# ============================================================
+# Resource Quotas & LimitRanges — Production Namespace
+# ============================================================
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nexacommerce-prod-quota
+  namespace: nexacommerce-prod
+spec:
+  hard:
+    # Compute
+    requests.cpu: "100"
+    requests.memory: 200Gi
+    limits.cpu: "200"
+    limits.memory: 400Gi
+    # Objects
+    pods: "200"
+    services: "50"
+    secrets: "100"
+    configmaps: "100"
+    persistentvolumeclaims: "30"
+    # Load balancers
+    services.loadbalancers: "5"
+    services.nodeports: "0"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: nexacommerce-prod-limits
+  namespace: nexacommerce-prod
+spec:
+  limits:
+    # Container defaults (applied if not specified)
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "4"
+        memory: 8Gi
+      min:
+        cpu: 50m
+        memory: 64Mi
+    # Pod maximums
+    - type: Pod
+      max:
+        cpu: "8"
+        memory: 16Gi
+    # PVC size limits
+    - type: PersistentVolumeClaim
+      max:
+        storage: 100Gi
+      min:
+        storage: 1Gi

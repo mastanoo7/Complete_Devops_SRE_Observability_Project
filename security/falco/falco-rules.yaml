@@ -1,0 +1,210 @@
+# ============================================================
+# Falco — Custom Rules for NexaCommerce
+# Runtime threat detection for Kubernetes workloads
+# ============================================================
+
+# ── Macro Definitions ─────────────────────────────────────
+- macro: nexacommerce_containers
+  condition: >
+    container.image.repository in (
+      "nexacommerce/auth-service",
+      "nexacommerce/product-service",
+      "nexacommerce/cart-service",
+      "nexacommerce/order-service",
+      "nexacommerce/payment-service",
+      "nexacommerce/inventory-service",
+      "nexacommerce/search-service",
+      "nexacommerce/notification-service",
+      "nexacommerce/frontend"
+    )
+
+- macro: payment_container
+  condition: container.image.repository = "nexacommerce/payment-service"
+
+- macro: allowed_payment_destinations
+  condition: >
+    fd.sip in (
+      "api.stripe.com",
+      "api.braintreegateway.com"
+    )
+
+- macro: allowed_outbound_ports
+  condition: fd.sport in (443, 5432, 6379, 9092, 9200, 27017)
+
+- macro: shell_binaries
+  condition: proc.name in (bash, sh, zsh, ksh, fish, tcsh, csh, dash)
+
+- macro: package_managers
+  condition: proc.name in (apt, apt-get, yum, dnf, pip, pip3, npm, yarn, gem)
+
+# ── Critical Rules ────────────────────────────────────────
+
+# Detect shell spawned in any container
+- rule: Shell Spawned in Container
+  desc: A shell was spawned in a container — possible intrusion
+  condition: >
+    spawned_process
+    and container
+    and nexacommerce_containers
+    and shell_binaries
+    and not proc.pname in (sh, bash, entrypoint.sh)
+  output: >
+    Shell spawned in container
+    (user=%user.name user_loginuid=%user.loginuid
+     container_id=%container.id container_name=%container.name
+     image=%container.image.repository:%container.image.tag
+     shell=%proc.name parent=%proc.pname cmdline=%proc.cmdline)
+  priority: CRITICAL
+  tags: [container, shell, intrusion, nexacommerce]
+
+# Detect package manager in container
+- rule: Package Manager Executed in Container
+  desc: A package manager was executed — possible supply chain attack
+  condition: >
+    spawned_process
+    and container
+    and nexacommerce_containers
+    and package_managers
+  output: >
+    Package manager executed in container
+    (user=%user.name container=%container.name
+     image=%container.image.repository
+     cmd=%proc.cmdline)
+  priority: ERROR
+  tags: [container, supply-chain, nexacommerce]
+
+# Detect unexpected outbound connection from payment service
+- rule: Unexpected Outbound Connection from Payment Service
+  desc: Payment service connecting to unexpected destination — possible data exfiltration
+  condition: >
+    outbound
+    and payment_container
+    and not allowed_payment_destinations
+    and not fd.sport in (5432, 6379)
+  output: >
+    Unexpected outbound connection from payment service
+    (user=%user.name container=%container.name
+     connection=%fd.name
+     image=%container.image.repository)
+  priority: CRITICAL
+  tags: [network, payment, pci-dss, nexacommerce]
+
+# Detect sensitive file access
+- rule: Sensitive File Access in Container
+  desc: A sensitive file was accessed in a container
+  condition: >
+    open_read
+    and container
+    and nexacommerce_containers
+    and fd.name in (/etc/shadow, /etc/passwd, /etc/sudoers, /root/.ssh/id_rsa)
+  output: >
+    Sensitive file accessed
+    (user=%user.name container=%container.name
+     file=%fd.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [filesystem, sensitive-data, nexacommerce]
+
+# Detect write to /etc in container
+- rule: Write to /etc in Container
+  desc: A file was written to /etc — possible config tampering
+  condition: >
+    open_write
+    and container
+    and nexacommerce_containers
+    and fd.name startswith /etc/
+  output: >
+    Write to /etc in container
+    (user=%user.name container=%container.name
+     file=%fd.name image=%container.image.repository)
+  priority: ERROR
+  tags: [filesystem, tampering, nexacommerce]
+
+# Detect privilege escalation
+- rule: Privilege Escalation Attempt
+  desc: A process attempted to escalate privileges
+  condition: >
+    spawned_process
+    and container
+    and nexacommerce_containers
+    and proc.name in (sudo, su, newgrp)
+  output: >
+    Privilege escalation attempt
+    (user=%user.name container=%container.name
+     proc=%proc.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [privilege-escalation, nexacommerce]
+
+# Detect crypto mining
+- rule: Crypto Mining Activity Detected
+  desc: Possible crypto mining activity detected
+  condition: >
+    spawned_process
+    and container
+    and proc.name in (xmrig, minerd, cpuminer, ethminer)
+  output: >
+    Crypto mining process detected
+    (user=%user.name container=%container.name
+     proc=%proc.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [cryptomining, malware, nexacommerce]
+
+# Detect container escape attempt
+- rule: Container Escape Attempt
+  desc: Process attempting to escape container via /proc
+  condition: >
+    open_read
+    and container
+    and fd.name startswith /proc/1/
+    and not proc.name in (ps, top, htop)
+  output: >
+    Container escape attempt via /proc
+    (user=%user.name container=%container.name
+     file=%fd.name proc=%proc.name)
+  priority: CRITICAL
+  tags: [container-escape, nexacommerce]
+
+# Detect kubectl in container
+- rule: Kubectl Executed in Container
+  desc: kubectl was executed inside a container — lateral movement risk
+  condition: >
+    spawned_process
+    and container
+    and proc.name = kubectl
+  output: >
+    kubectl executed in container
+    (user=%user.name container=%container.name
+     cmdline=%proc.cmdline image=%container.image.repository)
+  priority: WARNING
+  tags: [lateral-movement, nexacommerce]
+
+# Detect network scanning
+- rule: Network Port Scan Detected
+  desc: Rapid outbound connections to multiple ports — possible port scan
+  condition: >
+    outbound
+    and container
+    and nexacommerce_containers
+    and fd.sport > 1024
+    and not allowed_outbound_ports
+  output: >
+    Unexpected outbound port connection
+    (container=%container.name port=%fd.sport
+     dest=%fd.sip image=%container.image.repository)
+  priority: WARNING
+  tags: [network, scanning, nexacommerce]
+
+# Detect secrets in environment variables
+- rule: Secret in Environment Variable
+  desc: Possible secret detected in process environment
+  condition: >
+    spawned_process
+    and container
+    and nexacommerce_containers
+    and proc.env contains "PASSWORD="
+    and proc.env contains "SECRET="
+    and proc.env contains "API_KEY="
+  output: >
+    Possible secret in process environment
+    (container=%container.name proc=%proc.name)
+  priority: WARNING
+  tags: [secrets, nexacommerce]

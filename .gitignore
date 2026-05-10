@@ -1,0 +1,130 @@
+# ============================================================
+# NexaCommerce — .gitignore
+# ============================================================
+
+# ── Secrets & Credentials ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+*-credentials.json
+service-account*.json
+kubeconfig
+kubeconfig-*
+.kube/
+
+# ── Terraform ────────────────────────────────────────────────
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfplan
+tfplan
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+
+# ── Node.js ──────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.yarn/cache
+.yarn/unplugged
+.pnp.*
+dist/
+build/
+.next/
+out/
+.nuxt/
+.cache/
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Java / Maven / Gradle ────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+.mvn/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ── Go ───────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# ── Docker ───────────────────────────────────────────────────
+.dockerignore
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ── Kubernetes ───────────────────────────────────────────────
+*.kubeconfig
+helm/*/charts/
+helm/*/*.lock
+
+# ── IDE & Editor ─────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+*.log.*
+
+# ── Test Coverage ────────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+
+# ── Build Artifacts ──────────────────────────────────────────
+*.zip
+*.tar.gz
+*.tgz
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

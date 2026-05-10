@@ -1,0 +1,162 @@
+# ============================================================
+# NexaCommerce Helm Chart — Production Values
+# ============================================================
+
+global:
+  registry: "123456789.dkr.ecr.us-east-1.amazonaws.com"
+  imageTag: "1.0.0"
+  environment: production
+  namespace: nexacommerce-prod
+  imagePullPolicy: Always
+
+# ── Feature Flags ─────────────────────────────────────────
+frontend:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/frontend
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+authService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/auth-service
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+
+productService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/product-service
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: 2000m, memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+
+cartService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/cart-service
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+
+orderService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/order-service
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: 2000m, memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+
+paymentService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/payment-service
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+  nodeSelector:
+    workload-type: payment-pci
+
+inventoryService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/inventory-service
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+
+searchService:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: nexacommerce/search-service
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: 2000m, memory: 4Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+
+notificationService:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: nexacommerce/notification-service
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+
+# ── Ingress ───────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: kong
+  annotations:
+    konghq.com/strip-path: "true"
+    konghq.com/plugins: "rate-limiting,jwt-auth,cors"
+  hosts:
+    - host: api.nexacommerce.com
+      paths:
+        - path: /auth
+          service: auth-service
+        - path: /products
+          service: product-service
+        - path: /cart
+          service: cart-service
+        - path: /orders
+          service: order-service
+        - path: /payments
+          service: payment-service
+  tls:
+    - secretName: nexacommerce-tls
+      hosts: [api.nexacommerce.com]
+
+# ── Service Monitor (Prometheus) ──────────────────────────
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  scrapeTimeout: 10s

@@ -1,0 +1,28 @@
+# ============================================================
+# Istio — PeerAuthentication (mTLS Strict Mode)
+# Enforces mutual TLS for all services in production
+# ============================================================
+
+---
+# Mesh-wide strict mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls
+  namespace: nexacommerce-prod
+spec:
+  mtls:
+    mode: STRICT
+---
+# Payment service: extra strict (no permissive fallback)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: payment-service-mtls
+  namespace: nexacommerce-prod
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  mtls:
+    mode: STRICT

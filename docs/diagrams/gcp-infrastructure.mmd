@@ -1,0 +1,115 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#4285F4',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#1967D2',
+    'lineColor': '#4285F4',
+    'clusterBkg': '#1a1a2e',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph TB
+    classDef gcpService fill:#4285F4,stroke:#1967D2,color:#fff,rx:6
+    classDef gcpNetwork fill:#34A853,stroke:#1E8E3E,color:#fff,rx:6
+    classDef gcpDB fill:#FBBC04,stroke:#F29900,color:#000,rx:6
+    classDef gcpCompute fill:#EA4335,stroke:#C5221F,color:#fff,rx:6
+    classDef gcpSecurity fill:#9334E6,stroke:#7627BB,color:#fff,rx:6
+    classDef gcpStorage fill:#00897B,stroke:#00695C,color:#fff,rx:6
+    classDef gcpMonitor fill:#E8710A,stroke:#C25700,color:#fff,rx:6
+    classDef gcpML fill:#1A73E8,stroke:#1557B0,color:#fff,rx:6
+    classDef internet fill:#1a1a2e,stroke:#4285F4,color:#4285F4,rx:6
+
+    INTERNET(["🌍 Internet Traffic"]):::internet
+
+    subgraph GCP_GLOBAL ["🌐 GCP Global Services"]
+        CLOUD_DNS["🔀 Cloud DNS\nGlobal anycast\nGeo-routing policies"]:::gcpNetwork
+        CLOUD_ARMOR["🛡️ Cloud Armor\nWAF + DDoS\nAdaptive protection"]:::gcpSecurity
+        GLB["⚖️ Global Load Balancer\nAnycast IP\nSSL termination"]:::gcpNetwork
+        CDN_GCP["📦 Cloud CDN\nEdge caching\n100+ PoPs"]:::gcpNetwork
+    end
+
+    subgraph US_CENTRAL ["📍 us-central1 — Primary"]
+        subgraph VPC_USC ["🔒 VPC: 10.20.0.0/16"]
+            subgraph GKE_CLUSTER ["☸️ GKE Autopilot Cluster"]
+                GKE_USC["☸️ GKE Autopilot 1.29\nAuto-provisioning\nWorkload Identity"]:::gcpCompute
+                CLOUD_RUN["⚡ Cloud Run\nServerless containers\nEvent-driven scaling"]:::gcpCompute
+            end
+
+            subgraph DATA_USC ["Data Layer"]
+                SPANNER["🗄️ Cloud Spanner\nGlobal consistency\n99.999% SLA"]:::gcpDB
+                FIRESTORE["📄 Firestore\nReal-time sync\nMulti-region"]:::gcpDB
+                MEMSTORE["⚡ Memorystore Redis\n6.x HA cluster\n3 replicas"]:::gcpDB
+                PUBSUB["📨 Cloud Pub/Sub\nGlobal messaging\nAt-least-once delivery"]:::gcpDB
+                BQ["📊 BigQuery\nAnalytics warehouse\nML feature store"]:::gcpDB
+            end
+        end
+    end
+
+    subgraph ASIA_EAST ["📍 asia-east1 — Secondary"]
+        subgraph VPC_AE ["🔒 VPC: 10.21.0.0/16"]
+            GKE_AE["☸️ GKE Asia East\nAPAC traffic\nStandby cluster"]:::gcpCompute
+            SPANNER_AE["🗄️ Spanner Replica\nRead-only\nLow-latency APAC"]:::gcpDB
+            MEMSTORE_AE["⚡ Memorystore AE\nRead replica"]:::gcpDB
+        end
+    end
+
+    subgraph SHARED_GCP ["🔧 Shared GCP Services"]
+        AR["📦 Artifact Registry\nContainer + Helm charts\nVulnerability scanning"]:::gcpStorage
+        GCS["🪣 Cloud Storage\nMulti-region\nObject versioning"]:::gcpStorage
+        SECRET_MGR["🔑 Secret Manager\nAutomatic rotation\nAudit logging"]:::gcpSecurity
+        IAM_GCP["👤 IAM + Workload Identity\nPod-level SA binding\nLeast privilege"]:::gcpSecurity
+        SCC["🛡️ Security Command Center\nThreat detection\nCompliance monitoring"]:::gcpSecurity
+        CLOUD_MON["📊 Cloud Monitoring\nMetrics + Alerting\nSLO monitoring"]:::gcpMonitor
+        CLOUD_LOG["📝 Cloud Logging\nCentralized logs\n30-day retention"]:::gcpMonitor
+        CLOUD_TRACE["🔍 Cloud Trace\nDistributed tracing\nLatency analysis"]:::gcpMonitor
+        CLOUD_SEARCH["🔍 Vertex AI Search\nSemantic product search\nPersonalization"]:::gcpML
+        VERTEX_AI["🤖 Vertex AI\nRecommendation engine\nDemand forecasting"]:::gcpML
+        DATAFLOW["🔄 Dataflow\nStream processing\nETL pipelines"]:::gcpService
+        CLOUD_SQL["🗄️ Cloud SQL PostgreSQL\nHA + Read replicas\nPoint-in-time recovery"]:::gcpDB
+    end
+
+    subgraph CICD_GCP ["🔄 CI/CD (GCP)"]
+        CLOUD_BUILD["🔨 Cloud Build\nCI pipeline\nContainer scanning"]:::gcpService
+        CLOUD_DEPLOY["🚀 Cloud Deploy\nCD pipeline\nApproval gates"]:::gcpService
+    end
+
+    INTERNET --> CLOUD_DNS
+    CLOUD_DNS --> GLB
+    GLB --> CLOUD_ARMOR
+    GLB --> CDN_GCP
+    CLOUD_ARMOR --> GKE_USC
+    CLOUD_ARMOR --> GKE_AE
+
+    GKE_USC --> SPANNER
+    GKE_USC --> FIRESTORE
+    GKE_USC --> MEMSTORE
+    GKE_USC --> PUBSUB
+    GKE_USC --> BQ
+    GKE_USC --> CLOUD_SQL
+    GKE_USC --> CLOUD_SEARCH
+    GKE_USC --> VERTEX_AI
+    GKE_USC --> CLOUD_RUN
+
+    SPANNER -.->|"Multi-region\nreplication"| SPANNER_AE
+    MEMSTORE -.->|"Read replica"| MEMSTORE_AE
+
+    PUBSUB --> DATAFLOW
+    DATAFLOW --> BQ
+
+    GKE_USC --> SECRET_MGR
+    IAM_GCP --> GKE_USC
+    SCC --> GKE_USC
+
+    GKE_USC --> CLOUD_MON
+    GKE_USC --> CLOUD_LOG
+    GKE_USC --> CLOUD_TRACE
+
+    AR --> GKE_USC
+    AR --> GKE_AE
+    GCS --> CDN_GCP
+
+    CLOUD_BUILD --> AR
+    CLOUD_BUILD --> CLOUD_DEPLOY
+    CLOUD_DEPLOY --> GKE_USC

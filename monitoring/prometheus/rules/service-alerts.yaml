@@ -1,0 +1,289 @@
+# ============================================================
+# Prometheus — SLO Alert Rules
+# SLI/SLO-based alerting for all services
+# ============================================================
+
+groups:
+  # ── Availability SLOs ────────────────────────────────────
+  - name: slo.availability
+    interval: 30s
+    rules:
+      # Auth Service — 99.9% availability SLO
+      - alert: AuthServiceAvailabilitySLOBreach
+        expr: |
+          (
+            sum(rate(http_requests_total{service="auth-service", code!~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="auth-service"}[5m]))
+          ) < 0.999
+        for: 2m
+        labels:
+          severity: critical
+          service: auth-service
+          slo: availability
+          team: platform
+        annotations:
+          summary: "Auth Service availability SLO breach"
+          description: "Auth service availability is {{ $value | humanizePercentage }}, below 99.9% SLO"
+          runbook: "https://wiki.nexacommerce.com/runbooks/auth-service-availability"
+          dashboard: "https://grafana.nexacommerce.com/d/auth-service"
+
+      # Product Service — 99.9% availability SLO
+      - alert: ProductServiceAvailabilitySLOBreach
+        expr: |
+          (
+            sum(rate(http_requests_total{service="product-service", code!~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="product-service"}[5m]))
+          ) < 0.999
+        for: 2m
+        labels:
+          severity: critical
+          service: product-service
+          slo: availability
+        annotations:
+          summary: "Product Service availability SLO breach"
+          description: "Product service availability is {{ $value | humanizePercentage }}"
+          runbook: "https://wiki.nexacommerce.com/runbooks/product-service"
+
+      # Payment Service — 99.99% availability SLO (stricter)
+      - alert: PaymentServiceAvailabilitySLOBreach
+        expr: |
+          (
+            sum(rate(http_requests_total{service="payment-service", code!~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="payment-service"}[5m]))
+          ) < 0.9999
+        for: 1m
+        labels:
+          severity: critical
+          service: payment-service
+          slo: availability
+          pci_scope: "true"
+        annotations:
+          summary: "CRITICAL: Payment Service availability SLO breach"
+          description: "Payment service availability is {{ $value | humanizePercentage }}, below 99.99% SLO"
+          runbook: "https://wiki.nexacommerce.com/runbooks/payment-service"
+
+  # ── Latency SLOs ─────────────────────────────────────────
+  - name: slo.latency
+    interval: 30s
+    rules:
+      # Auth Service P99 < 200ms
+      - alert: AuthServiceLatencySLOBreach
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="auth-service"}[5m]))
+            by (le)
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          service: auth-service
+          slo: latency
+        annotations:
+          summary: "Auth Service P99 latency SLO breach"
+          description: "Auth service P99 latency is {{ $value | humanizeDuration }}, above 200ms SLO"
+
+      # Product Service P99 < 500ms
+      - alert: ProductServiceLatencySLOBreach
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="product-service"}[5m]))
+            by (le)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: product-service
+          slo: latency
+        annotations:
+          summary: "Product Service P99 latency SLO breach"
+          description: "Product service P99 latency is {{ $value | humanizeDuration }}"
+
+      # Payment Service P99 < 3s
+      - alert: PaymentServiceLatencySLOBreach
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="payment-service"}[5m]))
+            by (le)
+          ) > 3.0
+        for: 2m
+        labels:
+          severity: critical
+          service: payment-service
+          slo: latency
+        annotations:
+          summary: "Payment Service P99 latency SLO breach"
+          description: "Payment service P99 latency is {{ $value | humanizeDuration }}, above 3s SLO"
+
+  # ── Error Budget Burn Rate ────────────────────────────────
+  - name: slo.error-budget
+    rules:
+      # Fast burn: 14.4x burn rate over 1h (consumes 2% budget in 1h)
+      - alert: ErrorBudgetFastBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{code=~"5..", namespace="nexacommerce-prod"}[1h]))
+            /
+            sum(rate(http_requests_total{namespace="nexacommerce-prod"}[1h]))
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: critical
+          alerttype: error-budget
+        annotations:
+          summary: "Fast error budget burn rate detected"
+          description: "Error rate is burning error budget 14.4x faster than expected"
+
+      # Slow burn: 6x burn rate over 6h (consumes 5% budget in 6h)
+      - alert: ErrorBudgetSlowBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{code=~"5..", namespace="nexacommerce-prod"}[6h]))
+            /
+            sum(rate(http_requests_total{namespace="nexacommerce-prod"}[6h]))
+          ) > (6 * 0.001)
+        for: 15m
+        labels:
+          severity: warning
+          alerttype: error-budget
+        annotations:
+          summary: "Slow error budget burn rate detected"
+          description: "Error rate is burning error budget 6x faster than expected over 6h"
+
+  # ── Infrastructure Alerts ─────────────────────────────────
+  - name: infrastructure
+    rules:
+      - alert: PodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{namespace=~"nexacommerce-.*"}[15m]) * 60 > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash looping"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has restarted {{ $value }} times in 15 minutes"
+          runbook: "https://wiki.nexacommerce.com/runbooks/pod-crashloop"
+
+      - alert: PodNotReady
+        expr: |
+          kube_pod_status_ready{condition="true", namespace=~"nexacommerce-.*"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} is not ready"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been not ready for 5 minutes"
+
+      - alert: DeploymentReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas{namespace=~"nexacommerce-.*"}
+          != kube_deployment_status_available_replicas{namespace=~"nexacommerce-.*"}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deployment {{ $labels.deployment }} replica mismatch"
+          description: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has {{ $value }} available replicas, expected {{ $labels.spec_replicas }}"
+
+      - alert: NodeHighCPU
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.instance }} high CPU usage"
+          description: "Node CPU usage is {{ $value }}%"
+
+      - alert: NodeHighMemory
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.instance }} high memory usage"
+          description: "Node memory usage is {{ $value }}%"
+
+      - alert: NodeDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node {{ $labels.instance }} disk space low"
+          description: "Node disk space is {{ $value }}% free"
+
+  # ── Database Alerts ───────────────────────────────────────
+  - name: databases
+    rules:
+      - alert: AuroraHighConnections
+        expr: |
+          aws_rds_database_connections_average > 800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aurora PostgreSQL high connection count"
+          description: "Aurora has {{ $value }} connections (limit: 1000)"
+
+      - alert: RedisHighMemory
+        expr: |
+          redis_memory_used_bytes / redis_memory_max_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis memory usage is {{ $value }}%"
+
+  # ── Business Metric Alerts ────────────────────────────────
+  - name: business
+    rules:
+      - alert: OrderFailureRateHigh
+        expr: |
+          (
+            sum(rate(orders_total{status="failed"}[5m]))
+            /
+            sum(rate(orders_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: orders
+        annotations:
+          summary: "Order failure rate above 5%"
+          description: "Order failure rate is {{ $value | humanizePercentage }}"
+
+      - alert: PaymentFailureRateHigh
+        expr: |
+          (
+            sum(rate(payments_total{status="failed"}[5m]))
+            /
+            sum(rate(payments_total[5m]))
+          ) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+          team: payments
+        annotations:
+          summary: "Payment failure rate above 2%"
+          description: "Payment failure rate is {{ $value | humanizePercentage }}"
+
+      - alert: CheckoutConversionDropped
+        expr: |
+          (
+            sum(rate(checkout_completed_total[1h]))
+            /
+            sum(rate(checkout_started_total[1h]))
+          ) < 0.3
+        for: 15m
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "Checkout conversion rate dropped below 30%"
+          description: "Checkout conversion is {{ $value | humanizePercentage }}"

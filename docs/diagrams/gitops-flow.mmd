@@ -1,0 +1,76 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#E3B341', 'primaryTextColor': '#000', 'primaryBorderColor': '#B08800', 'lineColor': '#E3B341', 'clusterBkg': '#0d1117', 'fontFamily': 'Inter, sans-serif'}}}%%
+
+graph TB
+    classDef git fill:#F05032,stroke:#C03A22,color:#fff,rx:6
+    classDef argo fill:#EF7B4D,stroke:#C05A30,color:#fff,rx:6
+    classDef k8s fill:#326CE5,stroke:#2150B0,color:#fff,rx:6
+    classDef env fill:#238636,stroke:#1a6329,color:#fff,rx:6
+    classDef notify fill:#8957E5,stroke:#6E40C9,color:#fff,rx:6
+
+    subgraph GIT_REPOS ["📁 Git Repositories"]
+        APP_REPO["📦 App Repo\nnexacommerce/app\nSource code"]:::git
+        INFRA_REPO["🏗️ Infra Repo\nnexacommerce/gitops\nK8s manifests + Helm values"]:::git
+        POLICY_REPO["📋 Policy Repo\nnexacommerce/policies\nOPA + Kyverno policies"]:::git
+    end
+
+    subgraph CI_LAYER ["🔄 CI Layer"]
+        GH_ACTIONS["⚡ GitHub Actions\nBuild + Test + Scan\nPush image to registry"]:::git
+        IMAGE_UPDATER["🤖 ArgoCD Image Updater\nAuto-detect new tags\nUpdate values.yaml"]:::argo
+    end
+
+    subgraph ARGOCD ["🔄 ArgoCD Control Plane"]
+        ARGO_SERVER["🖥️ ArgoCD Server\nUI + API + CLI\nSSO via GitHub OIDC"]:::argo
+        REPO_SERVER["📁 Repo Server\nHelm template render\nKustomize build"]:::argo
+        APP_CTRL["⚙️ App Controller\nReconciliation: 3min\nSelf-heal: enabled"]:::argo
+        NOTIF_CTRL["🔔 Notifications\nSlack + PagerDuty\nDeploy events"]:::argo
+    end
+
+    subgraph APP_OF_APPS ["📋 App-of-Apps Pattern"]
+        ROOT_APP["🌳 Root Application\nargocd/root-app.yaml\nBootstraps all apps"]:::argo
+        DEV_APPS["🔧 DEV Apps\nAll services → dev ns\nAuto-sync: true"]:::argo
+        STAGING_APPS["🧪 STAGING Apps\nAll services → staging ns\nAuto-sync: true"]:::argo
+        PROD_APPS["🏭 PROD Apps\nAll services → prod ns\nAuto-sync: false\nManual approval"]:::argo
+    end
+
+    subgraph K8S_CLUSTERS ["☸️ Kubernetes Clusters"]
+        DEV_CLUSTER["🔧 DEV Cluster\nEKS dev\nAuto-sync on commit"]:::k8s
+        STAGING_CLUSTER["🧪 STAGING Cluster\nEKS staging\nSync on release"]:::k8s
+        PROD_AWS["🏭 PROD AWS\nEKS production\nBlue/Green deploy"]:::k8s
+        PROD_AZURE["🏭 PROD Azure\nAKS production\nCanary deploy"]:::k8s
+        PROD_GCP["🏭 PROD GCP\nGKE production\nRolling deploy"]:::k8s
+    end
+
+    subgraph SYNC_STRATEGY ["🔄 Sync Strategies"]
+        BLUE_GREEN["🔵🟢 Blue/Green\nInstant cutover\nZero downtime"]:::env
+        CANARY["🐦 Canary\n5% → 25% → 100%\nMetric-based promotion"]:::env
+        ROLLING["🔄 Rolling Update\nmaxSurge: 25%\nmaxUnavailable: 0"]:::env
+    end
+
+    APP_REPO --> GH_ACTIONS
+    GH_ACTIONS -->|"Push image\nsha-abc123"| IMAGE_UPDATER
+    IMAGE_UPDATER -->|"PR: bump image tag\nin values.yaml"| INFRA_REPO
+
+    INFRA_REPO --> REPO_SERVER
+    POLICY_REPO --> REPO_SERVER
+
+    REPO_SERVER --> APP_CTRL
+    APP_CTRL --> ARGO_SERVER
+    ARGO_SERVER --> ROOT_APP
+
+    ROOT_APP --> DEV_APPS
+    ROOT_APP --> STAGING_APPS
+    ROOT_APP --> PROD_APPS
+
+    DEV_APPS -->|"Auto-sync"| DEV_CLUSTER
+    STAGING_APPS -->|"Auto-sync"| STAGING_CLUSTER
+    PROD_APPS -->|"Manual gate"| PROD_AWS
+    PROD_APPS -->|"Manual gate"| PROD_AZURE
+    PROD_APPS -->|"Manual gate"| PROD_GCP
+
+    PROD_AWS --> BLUE_GREEN
+    PROD_AZURE --> CANARY
+    PROD_GCP --> ROLLING
+
+    APP_CTRL --> NOTIF_CTRL
+    NOTIF_CTRL --> notify1["💬 Slack #deployments"]:::notify
+    NOTIF_CTRL --> notify2["🚨 PagerDuty\n(on failure)"]:::notify

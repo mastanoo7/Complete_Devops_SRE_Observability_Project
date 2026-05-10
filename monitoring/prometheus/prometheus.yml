@@ -1,0 +1,191 @@
+# ============================================================
+# Prometheus — Main Configuration
+# Production-grade scrape config for all services
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: nexacommerce-prod
+    region: us-east-1
+    environment: production
+
+# ── Alertmanager Configuration ────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+      timeout: 10s
+      api_version: v2
+
+# ── Rule Files ────────────────────────────────────────────
+rule_files:
+  - /etc/prometheus/rules/slo-rules.yaml
+  - /etc/prometheus/rules/service-alerts.yaml
+  - /etc/prometheus/rules/infrastructure-alerts.yaml
+  - /etc/prometheus/rules/business-alerts.yaml
+  - /etc/prometheus/rules/recording-rules.yaml
+
+# ── Scrape Configurations ─────────────────────────────────
+scrape_configs:
+
+  # ── Prometheus self-monitoring ──────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  # ── Kubernetes API server ───────────────────────────────
+  - job_name: kubernetes-apiservers
+    kubernetes_sd_configs:
+      - role: endpoints
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+  # ── Kubernetes nodes ────────────────────────────────────
+  - job_name: kubernetes-nodes
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+
+  # ── cAdvisor (container metrics) ────────────────────────
+  - job_name: kubernetes-cadvisor
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    metrics_path: /metrics/cadvisor
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+
+  # ── NexaCommerce microservices (annotation-based) ───────
+  - job_name: nexacommerce-services
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [nexacommerce-prod, nexacommerce-staging, nexacommerce-dev]
+    relabel_configs:
+      # Only scrape pods with prometheus.io/scrape: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      # Use custom metrics path if specified
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      # Use custom port if specified
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      # Add pod labels
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      # Add namespace label
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      # Add pod name label
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+      # Add service name
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: service
+
+  # ── Istio control plane ─────────────────────────────────
+  - job_name: istio-mesh
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [istio-system]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: istio-telemetry;prometheus
+
+  # ── Istio envoy sidecars ─────────────────────────────────
+  - job_name: envoy-stats
+    metrics_path: /stats/prometheus
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        action: keep
+        regex: ".*envoy-prom"
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:15090
+        target_label: __address__
+
+  # ── Kong API Gateway ────────────────────────────────────
+  - job_name: kong
+    kubernetes_sd_configs:
+      - role: service
+        namespaces:
+          names: [kong]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_label_app]
+        action: keep
+        regex: kong
+
+  # ── Node Exporter ───────────────────────────────────────
+  - job_name: node-exporter
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [monitoring]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_endpoints_name]
+        action: keep
+        regex: node-exporter
+
+  # ── Kube State Metrics ──────────────────────────────────
+  - job_name: kube-state-metrics
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [monitoring]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_endpoints_name]
+        action: keep
+        regex: kube-state-metrics
+
+  # ── Blackbox Exporter (endpoint probing) ────────────────
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://nexacommerce.com/health
+          - https://api.nexacommerce.com/health
+          - https://nexacommerce.com/api/products
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

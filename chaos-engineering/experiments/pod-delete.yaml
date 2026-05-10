@@ -1,0 +1,228 @@
+# ============================================================
+# LitmusChaos — Pod Delete Experiment
+# Tests service resilience when pods are randomly deleted
+# ============================================================
+
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: pod-delete-product-service
+  namespace: nexacommerce-prod
+  labels:
+    experiment: pod-delete
+    service: product-service
+    team: platform-sre
+spec:
+  appinfo:
+    appns: nexacommerce-prod
+    applabel: app=product-service
+    appkind: deployment
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  monitoring: true
+  jobCleanUpPolicy: delete
+  annotationCheck: "true"
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            # Number of pods to delete
+            - name: TOTAL_CHAOS_DURATION
+              value: "60"
+            - name: CHAOS_INTERVAL
+              value: "10"
+            - name: FORCE
+              value: "false"
+            - name: PODS_AFFECTED_PERC
+              value: "33"
+        probe:
+          # Verify service remains available during chaos
+          - name: check-product-service-availability
+            type: httpProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: 5
+              retry: 3
+              interval: 2
+              stopOnFailure: true
+            httpProbe/inputs:
+              url: "http://product-service.nexacommerce-prod.svc.cluster.local/health/ready"
+              insecureSkipVerify: false
+              method:
+                get:
+                  criteria: ==
+                  responseCode: "200"
+          # Verify error rate stays below SLO
+          - name: check-error-rate-slo
+            type: promProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: 10
+              retry: 3
+              interval: 5
+              stopOnFailure: false
+            promProbe/inputs:
+              endpoint: "http://prometheus.monitoring.svc.cluster.local:9090"
+              query: >
+                sum(rate(http_requests_total{service="product-service",code=~"5.."}[1m]))
+                / sum(rate(http_requests_total{service="product-service"}[1m])) < 0.01
+              comparator:
+                criteria: "=="
+                value: "1"
+---
+# ============================================================
+# LitmusChaos — Network Latency Experiment
+# Injects network latency to test circuit breakers
+# ============================================================
+
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: network-latency-order-service
+  namespace: nexacommerce-prod
+  labels:
+    experiment: network-latency
+    service: order-service
+spec:
+  appinfo:
+    appns: nexacommerce-prod
+    applabel: app=order-service
+    appkind: deployment
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-network-latency
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "120"
+            - name: NETWORK_INTERFACE
+              value: eth0
+            - name: NETWORK_LATENCY
+              value: "2000"    # 2 second latency
+            - name: JITTER
+              value: "500"     # 500ms jitter
+            - name: PODS_AFFECTED_PERC
+              value: "50"
+        probe:
+          - name: check-circuit-breaker-opens
+            type: promProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: 30
+              retry: 3
+              interval: 10
+            promProbe/inputs:
+              endpoint: "http://prometheus.monitoring.svc.cluster.local:9090"
+              query: >
+                envoy_cluster_upstream_rq_pending_overflow{cluster_name="outbound|80||order-service.nexacommerce-prod.svc.cluster.local"} > 0
+              comparator:
+                criteria: ">="
+                value: "0"
+---
+# ============================================================
+# LitmusChaos — CPU Stress Experiment
+# Tests HPA scaling under CPU pressure
+# ============================================================
+
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: cpu-stress-auth-service
+  namespace: nexacommerce-prod
+  labels:
+    experiment: cpu-stress
+    service: auth-service
+spec:
+  appinfo:
+    appns: nexacommerce-prod
+    applabel: app=auth-service
+    appkind: deployment
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-cpu-hog
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "180"
+            - name: CPU_CORES
+              value: "1"
+            - name: CPU_LOAD
+              value: "90"
+            - name: PODS_AFFECTED_PERC
+              value: "50"
+        probe:
+          # Verify HPA scales up during CPU stress
+          - name: check-hpa-scales-up
+            type: k8sProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: 60
+              retry: 5
+              interval: 15
+            k8sProbe/inputs:
+              group: autoscaling
+              version: v2
+              resource: horizontalpodautoscalers
+              namespace: nexacommerce-prod
+              resourceNames: auth-service
+              operation: present
+          # Verify auth service remains available
+          - name: check-auth-availability
+            type: httpProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: 5
+              retry: 3
+              interval: 5
+              stopOnFailure: true
+            httpProbe/inputs:
+              url: "http://auth-service.nexacommerce-prod.svc.cluster.local/health/ready"
+              method:
+                get:
+                  criteria: ==
+                  responseCode: "200"
+---
+# ============================================================
+# LitmusChaos — Node Drain Experiment
+# Tests cluster resilience when a node is drained
+# ============================================================
+
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: node-drain-experiment
+  namespace: nexacommerce-prod
+  labels:
+    experiment: node-drain
+spec:
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: node-drain
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: "120"
+            - name: NODE_LABEL
+              value: "workload-type=general"
+        probe:
+          - name: check-platform-availability
+            type: httpProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: 10
+              retry: 3
+              interval: 5
+              stopOnFailure: true
+            httpProbe/inputs:
+              url: "https://api.nexacommerce.com/health"
+              method:
+                get:
+                  criteria: ==
+                  responseCode: "200"

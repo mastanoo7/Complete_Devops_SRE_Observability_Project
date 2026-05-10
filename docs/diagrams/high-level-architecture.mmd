@@ -1,0 +1,142 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#1a1a2e',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#4a9eff',
+    'lineColor': '#4a9eff',
+    'secondaryColor': '#16213e',
+    'tertiaryColor': '#0f3460',
+    'background': '#1a1a2e',
+    'mainBkg': '#16213e',
+    'nodeBorder': '#4a9eff',
+    'clusterBkg': '#0f3460',
+    'titleColor': '#ffffff',
+    'edgeLabelBackground': '#16213e',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph TB
+    classDef internet fill:#e74c3c,stroke:#c0392b,color:#fff,rx:8
+    classDef cdn fill:#e67e22,stroke:#d35400,color:#fff,rx:8
+    classDef gateway fill:#f39c12,stroke:#e67e22,color:#fff,rx:8
+    classDef aws fill:#FF9900,stroke:#FF6600,color:#fff,rx:8
+    classDef azure fill:#0078D4,stroke:#005A9E,color:#fff,rx:8
+    classDef gcp fill:#4285F4,stroke:#1967D2,color:#fff,rx:8
+    classDef service fill:#27ae60,stroke:#1e8449,color:#fff,rx:8
+    classDef database fill:#8e44ad,stroke:#6c3483,color:#fff,rx:8
+    classDef monitoring fill:#16a085,stroke:#117a65,color:#fff,rx:8
+    classDef security fill:#c0392b,stroke:#922b21,color:#fff,rx:8
+
+    USERS(["🌍 Global Users\n(Web + Mobile + API)"]):::internet
+
+    subgraph EDGE ["🌐 Edge Layer — CloudFlare"]
+        CF_DNS["🔀 CloudFlare DNS\nGlobal Anycast"]:::cdn
+        CF_CDN["📦 CloudFlare CDN\nStatic Assets + Cache"]:::cdn
+        CF_WAF["🛡️ CloudFlare WAF\nDDoS + Bot Protection"]:::cdn
+    end
+
+    subgraph AWS_CLOUD ["☁️ AWS — Primary (40% Traffic)"]
+        AWS_ALB["⚖️ AWS ALB\nus-east-1 + us-west-2"]:::aws
+        AWS_EKS["☸️ Amazon EKS\nKubernetes 1.29"]:::aws
+        AWS_RDS["🗄️ Aurora PostgreSQL\nMulti-AZ Cluster"]:::aws
+        AWS_REDIS["⚡ ElastiCache Redis\nCluster Mode"]:::aws
+        AWS_KAFKA["📨 MSK Kafka\nEvent Streaming"]:::aws
+        AWS_S3["🪣 S3 + CloudFront\nMedia & Assets"]:::aws
+    end
+
+    subgraph AZURE_CLOUD ["☁️ Azure — Secondary (35% Traffic)"]
+        AZ_FD["⚖️ Azure Front Door\nGlobal LB + WAF"]:::azure
+        AZ_AKS["☸️ Azure AKS\nKubernetes 1.29"]:::azure
+        AZ_COSMOS["🗄️ CosmosDB\nMulti-Region Write"]:::azure
+        AZ_REDIS["⚡ Azure Cache Redis\nPremium Tier"]:::azure
+        AZ_SB["📨 Service Bus\nEvent Streaming"]:::azure
+        AZ_BLOB["🪣 Blob Storage + CDN\nMedia & Assets"]:::azure
+    end
+
+    subgraph GCP_CLOUD ["☁️ GCP — Tertiary (25% Traffic)"]
+        GCP_GLB["⚖️ GCP Global LB\nAnycast + SSL"]:::gcp
+        GCP_GKE["☸️ Google GKE\nAutopilot 1.29"]:::gcp
+        GCP_SPANNER["🗄️ Cloud Spanner\nGlobal Consistency"]:::gcp
+        GCP_MEMSTORE["⚡ Memorystore Redis\nHA Cluster"]:::gcp
+        GCP_PUBSUB["📨 Cloud Pub/Sub\nEvent Streaming"]:::gcp
+        GCP_GCS["🪣 GCS + Cloud CDN\nMedia & Assets"]:::gcp
+    end
+
+    subgraph K8S_PLATFORM ["☸️ Kubernetes Platform (All Clouds)"]
+        KONG["🔀 Kong API Gateway\nRate Limit + Auth + Routing"]:::gateway
+        ISTIO["🕸️ Istio Service Mesh\nmTLS + Traffic Mgmt"]:::gateway
+
+        subgraph MICROSERVICES ["🔧 Microservices"]
+            AUTH["🔐 Auth Service\n(Go)"]:::service
+            PRODUCT["📦 Product Service\n(Java)"]:::service
+            CART["🛒 Cart Service\n(Node.js)"]:::service
+            ORDER["📋 Order Service\n(Java)"]:::service
+            PAYMENT["💳 Payment Service\n(Go)"]:::service
+            INVENTORY["📊 Inventory Service\n(Python)"]:::service
+            SEARCH["🔍 Search Service\n(Java)"]:::service
+            RECOMMEND["🤖 Recommendation\n(Python/ML)"]:::service
+            NOTIFY["🔔 Notification\n(Node.js)"]:::service
+            ADMIN["⚙️ Admin Service\n(Go)"]:::service
+        end
+    end
+
+    subgraph OBSERVABILITY ["📊 Observability Stack"]
+        PROMETHEUS["📈 Prometheus\nMetrics"]:::monitoring
+        GRAFANA["📊 Grafana\nDashboards"]:::monitoring
+        LOKI["📝 Loki\nLogs"]:::monitoring
+        JAEGER["🔍 Jaeger\nTracing"]:::monitoring
+    end
+
+    subgraph SECURITY_LAYER ["🔒 Security Stack"]
+        VAULT["🔑 HashiCorp Vault\nSecrets"]:::security
+        FALCO["👁️ Falco\nRuntime Security"]:::security
+        KYVERNO["📋 Kyverno\nPolicy Engine"]:::security
+    end
+
+    USERS --> CF_DNS
+    CF_DNS --> CF_CDN
+    CF_DNS --> CF_WAF
+    CF_WAF --> AWS_ALB
+    CF_WAF --> AZ_FD
+    CF_WAF --> GCP_GLB
+
+    AWS_ALB --> AWS_EKS
+    AZ_FD --> AZ_AKS
+    GCP_GLB --> GCP_GKE
+
+    AWS_EKS --> KONG
+    AZ_AKS --> KONG
+    GCP_GKE --> KONG
+
+    KONG --> ISTIO
+    ISTIO --> AUTH
+    ISTIO --> PRODUCT
+    ISTIO --> CART
+    ISTIO --> ORDER
+    ISTIO --> PAYMENT
+    ISTIO --> INVENTORY
+    ISTIO --> SEARCH
+    ISTIO --> RECOMMEND
+    ISTIO --> NOTIFY
+    ISTIO --> ADMIN
+
+    ORDER --> AWS_KAFKA
+    ORDER --> AZ_SB
+    ORDER --> GCP_PUBSUB
+
+    PRODUCT --> AWS_RDS
+    ORDER --> AWS_RDS
+    PAYMENT --> AWS_RDS
+    CART --> AWS_REDIS
+    SEARCH --> AWS_S3
+
+    MICROSERVICES --> PROMETHEUS
+    PROMETHEUS --> GRAFANA
+    MICROSERVICES --> LOKI
+    MICROSERVICES --> JAEGER
+
+    VAULT --> MICROSERVICES
+    FALCO --> MICROSERVICES
+    KYVERNO --> K8S_PLATFORM

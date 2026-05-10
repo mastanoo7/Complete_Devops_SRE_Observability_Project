@@ -1,0 +1,103 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#2088FF',
+    'primaryTextColor': '#ffffff',
+    'primaryBorderColor': '#1A6FCC',
+    'lineColor': '#2088FF',
+    'clusterBkg': '#0d1117',
+    'fontFamily': 'Inter, sans-serif'
+  }
+}}%%
+
+graph LR
+    classDef dev fill:#238636,stroke:#1a6329,color:#fff,rx:6
+    classDef ci fill:#2088FF,stroke:#1A6FCC,color:#fff,rx:6
+    classDef security fill:#DA3633,stroke:#B02A2A,color:#fff,rx:6
+    classDef registry fill:#8957E5,stroke:#6E40C9,color:#fff,rx:6
+    classDef gitops fill:#E3B341,stroke:#B08800,color:#000,rx:6
+    classDef deploy fill:#3FB950,stroke:#2EA043,color:#fff,rx:6
+    classDef notify fill:#F78166,stroke:#C4614D,color:#fff,rx:6
+
+    subgraph DEV ["👨‍💻 Developer Workflow"]
+        CODE["📝 Write Code\nFeature branch"]:::dev
+        COMMIT["📤 Git Commit\ngit push origin\nfeature/xxx"]:::dev
+        PR["🔀 Pull Request\nCode review\nRequired approvals: 2"]:::dev
+    end
+
+    subgraph CI_PIPELINE ["🔄 CI Pipeline — GitHub Actions"]
+        TRIGGER["⚡ Workflow Trigger\nOn: push, PR\nMatrix: services"]:::ci
+        LINT["🔍 Lint + Format\nESLint, golangci-lint\nBlack (Python)"]:::ci
+        UNIT_TEST["🧪 Unit Tests\nCoverage > 80%\nJUnit reports"]:::ci
+        INT_TEST["🔗 Integration Tests\nDocker Compose\nTestcontainers"]:::ci
+        BUILD["🔨 Docker Build\nMulti-stage\nBuildKit cache"]:::ci
+    end
+
+    subgraph SECURITY_SCAN ["🔒 Security Gates"]
+        SAST["🔍 SAST\nSonarQube\nCodeQL"]:::security
+        SCA["📦 SCA\nSnyk\nDependency check"]:::security
+        CONTAINER_SCAN["🐳 Container Scan\nTrivy\nGrype"]:::security
+        SECRET_SCAN["🔑 Secret Scan\nGitLeaks\nTruffleHog"]:::security
+        DAST["🌐 DAST\nOWASP ZAP\nOn staging only"]:::security
+    end
+
+    subgraph REGISTRY ["📦 Artifact Registry"]
+        ECR_PUSH["📤 Push to ECR\nTagged: SHA + semver\nSigned: Cosign"]:::registry
+        HELM_PUSH["📤 Push Helm Chart\nOCI registry\nVersioned"]:::registry
+        SBOM["📋 Generate SBOM\nSyft\nAttach to image"]:::registry
+    end
+
+    subgraph GITOPS ["🔄 GitOps — ArgoCD"]
+        UPDATE_MANIFEST["📝 Update Manifest\nImage tag bump\nAutomated PR"]:::gitops
+        ARGO_SYNC["🔄 ArgoCD Sync\nDetect drift\nAuto-sync: DEV"]:::gitops
+        HEALTH_CHECK["❤️ Health Check\nRollout status\nReadiness probes"]:::gitops
+    end
+
+    subgraph DEPLOY_ENVS ["🚀 Deployment Environments"]
+        DEV_DEPLOY["🔧 DEV Deploy\nAuto on merge\nSmoke tests"]:::deploy
+        STAGING_DEPLOY["🧪 STAGING Deploy\nOn release tag\nFull E2E tests"]:::deploy
+        PROD_APPROVE["✅ PROD Approval\nManual gate\nSRE sign-off"]:::deploy
+        PROD_DEPLOY["🏭 PROD Deploy\nCanary 5% → 100%\nAuto-rollback"]:::deploy
+    end
+
+    subgraph NOTIFY ["🔔 Notifications"]
+        SLACK["💬 Slack\nDeploy status\nAlert channel"]:::notify
+        PAGERDUTY["🚨 PagerDuty\nOn failure\nOn-call alert"]:::notify
+        JIRA["📋 Jira\nRelease notes\nAuto-close tickets"]:::notify
+    end
+
+    CODE --> COMMIT
+    COMMIT --> PR
+    PR --> TRIGGER
+
+    TRIGGER --> LINT
+    LINT --> UNIT_TEST
+    UNIT_TEST --> INT_TEST
+    INT_TEST --> BUILD
+
+    BUILD --> SAST
+    BUILD --> SCA
+    BUILD --> CONTAINER_SCAN
+    BUILD --> SECRET_SCAN
+
+    SAST --> ECR_PUSH
+    SCA --> ECR_PUSH
+    CONTAINER_SCAN --> ECR_PUSH
+    SECRET_SCAN --> ECR_PUSH
+
+    ECR_PUSH --> SBOM
+    ECR_PUSH --> HELM_PUSH
+
+    HELM_PUSH --> UPDATE_MANIFEST
+    UPDATE_MANIFEST --> ARGO_SYNC
+    ARGO_SYNC --> HEALTH_CHECK
+
+    HEALTH_CHECK --> DEV_DEPLOY
+    DEV_DEPLOY --> STAGING_DEPLOY
+    STAGING_DEPLOY --> DAST
+    DAST --> PROD_APPROVE
+    PROD_APPROVE --> PROD_DEPLOY
+
+    PROD_DEPLOY --> SLACK
+    PROD_DEPLOY --> JIRA
+    PROD_DEPLOY -.->|"On failure"| PAGERDUTY

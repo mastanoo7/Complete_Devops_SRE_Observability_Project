@@ -1,0 +1,238 @@
+{
+  "uid": "nexacommerce-slo-overview",
+  "title": "NexaCommerce — SLO Overview",
+  "description": "Service Level Objectives dashboard for all production services",
+  "tags": ["slo", "production", "nexacommerce"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "🎯 Platform Availability (30d)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.999 },
+              { "color": "green", "value": 0.9999 }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{namespace=\"nexacommerce-prod\", code!~\"5..\"}[30d])) / sum(rate(http_requests_total{namespace=\"nexacommerce-prod\"}[30d]))",
+          "legendFormat": "Availability"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "📉 Error Budget Remaining (30d)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "1 - (sum(rate(http_requests_total{namespace=\"nexacommerce-prod\", code=~\"5..\"}[30d])) / (sum(rate(http_requests_total{namespace=\"nexacommerce-prod\"}[30d])) * 0.001))",
+          "legendFormat": "Error Budget"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "⚡ P99 Latency — All Services",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1.0 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"nexacommerce-prod\"}[5m])) by (le, service))",
+          "legendFormat": "{{ service }} P99"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "🔴 Error Rate by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.001 },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{namespace=\"nexacommerce-prod\", code=~\"5..\"}[5m])) by (service) / sum(rate(http_requests_total{namespace=\"nexacommerce-prod\"}[5m])) by (service)",
+          "legendFormat": "{{ service }}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "📊 Request Rate (RPS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{namespace=\"nexacommerce-prod\"}[5m])) by (service)",
+          "legendFormat": "{{ service }}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "💳 Payment Success Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.97 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(payments_total{status=\"success\"}[5m])) / sum(rate(payments_total[5m]))",
+          "legendFormat": "Payment Success Rate"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "🛒 Order Success Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(orders_total{status=\"confirmed\"}[5m])) / sum(rate(orders_total[5m]))",
+          "legendFormat": "Order Success Rate"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "☸️ Pod Availability",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(kube_deployment_status_available_replicas{namespace=\"nexacommerce-prod\"}) by (deployment)",
+          "legendFormat": "{{ deployment }} available"
+        },
+        {
+          "expr": "sum(kube_deployment_spec_replicas{namespace=\"nexacommerce-prod\"}) by (deployment)",
+          "legendFormat": "{{ deployment }} desired"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "query",
+        "query": "label_values(kube_pod_info, namespace)",
+        "regex": "nexacommerce-.*",
+        "current": { "value": "nexacommerce-prod" }
+      },
+      {
+        "name": "service",
+        "type": "query",
+        "query": "label_values(http_requests_total{namespace=\"$namespace\"}, service)",
+        "current": { "value": "All", "text": "All" },
+        "includeAll": true
+      }
+    ]
+  }
+}
