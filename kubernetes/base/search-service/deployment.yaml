@@ -1,0 +1,186 @@
+# ============================================================
+# Search Service — Base Kubernetes Manifests
+# Java service backed by Elasticsearch
+# ============================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: search-service
+  namespace: nexacommerce-prod
+  labels:
+    app: search-service
+    version: v1
+    team: catalog
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-service
+  namespace: nexacommerce-prod
+  labels:
+    app: search-service
+    version: v1
+    team: catalog
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: search-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: search-service
+        version: v1
+        team: catalog
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/actuator/prometheus"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "search-service"
+    spec:
+      serviceAccountName: search-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [search-service]
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: search-service
+          image: REGISTRY/nexacommerce/search-service:IMAGE_TAG
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8088
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: SERVER_PORT
+              value: "8088"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "kubernetes"
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: search-service-config
+            - secretRef:
+                name: search-service-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8088
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8088
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-service
+  namespace: nexacommerce-prod
+  labels:
+    app: search-service
+spec:
+  type: ClusterIP
+  selector:
+    app: search-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8088
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: search-service
+  namespace: nexacommerce-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: search-service
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: search-service-pdb
+  namespace: nexacommerce-prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: search-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: search-service-config
+  namespace: nexacommerce-prod
+data:
+  ELASTICSEARCH_CONNECT_TIMEOUT: "5000"
+  ELASTICSEARCH_SOCKET_TIMEOUT: "30000"
+  SEARCH_MAX_RESULTS: "100"
+  SEARCH_DEFAULT_PAGE_SIZE: "20"
+  INDEX_PRODUCTS: "nexacommerce-products"
+  LOG_LEVEL: "INFO"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,prometheus"

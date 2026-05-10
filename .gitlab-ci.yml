@@ -1,0 +1,330 @@
+# ============================================================
+# GitLab CI/CD Pipeline — NexaCommerce
+# Full CI/CD pipeline for GitLab environments
+# ============================================================
+
+image: docker:24-dind
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY: $CI_REGISTRY
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  ENVIRONMENT: dev
+
+stages:
+  - validate
+  - test
+  - security
+  - build
+  - scan
+  - deploy-dev
+  - deploy-staging
+  - deploy-prod
+
+# ── Cache Configuration ──────────────────────────────────
+.go-cache: &go-cache
+  cache:
+    key: go-$CI_COMMIT_REF_SLUG
+    paths:
+      - .go/pkg/mod/
+
+.node-cache: &node-cache
+  cache:
+    key: node-$CI_COMMIT_REF_SLUG
+    paths:
+      - node_modules/
+      - frontend/node_modules/
+
+.maven-cache: &maven-cache
+  cache:
+    key: maven-$CI_COMMIT_REF_SLUG
+    paths:
+      - .m2/repository/
+
+# ── Validate Stage ────────────────────────────────────────
+lint-terraform:
+  stage: validate
+  image: hashicorp/terraform:1.7
+  script:
+    - terraform fmt -check -recursive terraform/
+    - cd terraform/environments/prod && terraform init -backend=false && terraform validate
+    - cd ../dev && terraform init -backend=false && terraform validate
+  rules:
+    - changes:
+        - terraform/**/*
+
+lint-kubernetes:
+  stage: validate
+  image: garethr/kubeval:latest
+  script:
+    - kubeval --recursive kubernetes/base/
+  rules:
+    - changes:
+        - kubernetes/**/*
+
+lint-go:
+  stage: validate
+  image: golangci/golangci-lint:latest
+  <<: *go-cache
+  script:
+    - |
+      for svc in auth-service payment-service admin-service; do
+        if [ -d "backend/$svc" ]; then
+          cd backend/$svc
+          golangci-lint run ./...
+          cd ../..
+        fi
+      done
+  rules:
+    - changes:
+        - backend/**/*.go
+
+lint-frontend:
+  stage: validate
+  image: node:20-alpine
+  <<: *node-cache
+  script:
+    - cd frontend && npm ci && npm run lint && npm run type-check
+  rules:
+    - changes:
+        - frontend/**/*
+
+# ── Test Stage ────────────────────────────────────────────
+test-go:
+  stage: test
+  image: golang:1.22-alpine
+  <<: *go-cache
+  script:
+    - |
+      for svc in auth-service payment-service admin-service; do
+        if [ -d "backend/$svc" ]; then
+          cd backend/$svc
+          go test ./... -v -race -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+          cd ../..
+        fi
+      done
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: "**/coverage.xml"
+
+test-java:
+  stage: test
+  image: maven:3.9-eclipse-temurin-21
+  <<: *maven-cache
+  script:
+    - |
+      for svc in product-service order-service; do
+        if [ -d "backend/$svc" ]; then
+          cd backend/$svc
+          mvn test -q
+          cd ../..
+        fi
+      done
+  artifacts:
+    reports:
+      junit:
+        - "**/target/surefire-reports/TEST-*.xml"
+
+test-node:
+  stage: test
+  image: node:20-alpine
+  <<: *node-cache
+  script:
+    - |
+      for svc in cart-service notification-service api-gateway; do
+        if [ -d "backend/$svc" ]; then
+          cd backend/$svc
+          npm ci && npm test -- --coverage --ci
+          cd ../..
+        fi
+      done
+    - cd frontend && npm ci && npm test -- --coverage --ci
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: "**/coverage/cobertura-coverage.xml"
+
+test-python:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - |
+      for svc in inventory-service recommendation-service; do
+        if [ -d "backend/$svc" ]; then
+          cd backend/$svc
+          pip install -r requirements-dev.txt -q
+          pytest --cov=. --cov-report=xml -v
+          cd ../..
+        fi
+      done
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: "**/coverage.xml"
+
+# ── Security Stage ────────────────────────────────────────
+secret-scan:
+  stage: security
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --report-format json --report-path gitleaks-report.json
+  artifacts:
+    when: always
+    paths:
+      - gitleaks-report.json
+
+sast:
+  stage: security
+  include:
+    - template: Security/SAST.gitlab-ci.yml
+
+dependency-scan:
+  stage: security
+  include:
+    - template: Security/Dependency-Scanning.gitlab-ci.yml
+
+iac-scan:
+  stage: security
+  image: bridgecrew/checkov:latest
+  script:
+    - checkov -d terraform/ --framework terraform --output cli --soft-fail
+    - checkov -d kubernetes/ --framework kubernetes --output cli --soft-fail
+  artifacts:
+    when: always
+    paths:
+      - checkov-results/
+
+# ── Build Stage ───────────────────────────────────────────
+.build-service: &build-service
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - |
+      docker build \
+        --build-arg GIT_COMMIT=$CI_COMMIT_SHORT_SHA \
+        --cache-from $REGISTRY/$CI_PROJECT_PATH/$SERVICE:latest \
+        -t $REGISTRY/$CI_PROJECT_PATH/$SERVICE:$IMAGE_TAG \
+        -t $REGISTRY/$CI_PROJECT_PATH/$SERVICE:latest \
+        backend/$SERVICE/
+      docker push $REGISTRY/$CI_PROJECT_PATH/$SERVICE:$IMAGE_TAG
+      docker push $REGISTRY/$CI_PROJECT_PATH/$SERVICE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+build-auth-service:
+  <<: *build-service
+  variables:
+    SERVICE: auth-service
+
+build-product-service:
+  <<: *build-service
+  variables:
+    SERVICE: product-service
+
+build-order-service:
+  <<: *build-service
+  variables:
+    SERVICE: order-service
+
+build-payment-service:
+  <<: *build-service
+  variables:
+    SERVICE: payment-service
+
+build-frontend:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - |
+      docker build \
+        --build-arg NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+        --build-arg GIT_COMMIT=$CI_COMMIT_SHORT_SHA \
+        -t $REGISTRY/$CI_PROJECT_PATH/frontend:$IMAGE_TAG \
+        -t $REGISTRY/$CI_PROJECT_PATH/frontend:latest \
+        frontend/
+      docker push $REGISTRY/$CI_PROJECT_PATH/frontend:$IMAGE_TAG
+      docker push $REGISTRY/$CI_PROJECT_PATH/frontend:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+# ── Container Scan Stage ──────────────────────────────────
+container-scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - |
+      for svc in auth-service product-service order-service payment-service frontend; do
+        trivy image \
+          --exit-code 1 \
+          --severity CRITICAL \
+          --ignore-unfixed \
+          $REGISTRY/$CI_PROJECT_PATH/$svc:$IMAGE_TAG
+      done
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+# ── Deploy DEV ────────────────────────────────────────────
+deploy-dev:
+  stage: deploy-dev
+  image: bitnami/kubectl:latest
+  environment:
+    name: development
+    url: https://dev.nexacommerce.internal
+  script:
+    - kubectl config use-context nexacommerce-dev
+    - |
+      cd kubernetes/overlays/dev
+      kustomize edit set image \
+        REGISTRY/nexacommerce/auth-service=$REGISTRY/$CI_PROJECT_PATH/auth-service:$IMAGE_TAG \
+        REGISTRY/nexacommerce/product-service=$REGISTRY/$CI_PROJECT_PATH/product-service:$IMAGE_TAG
+      kubectl apply -k .
+      kubectl rollout status deployment/auth-service -n nexacommerce-dev --timeout=300s
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ── Deploy Staging ────────────────────────────────────────
+deploy-staging:
+  stage: deploy-staging
+  image: bitnami/kubectl:latest
+  environment:
+    name: staging
+    url: https://staging.nexacommerce.com
+  script:
+    - kubectl config use-context nexacommerce-staging
+    - kubectl apply -k kubernetes/overlays/staging/
+    - kubectl rollout status deployment/auth-service -n nexacommerce-staging --timeout=300s
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+
+# ── Deploy Production ─────────────────────────────────────
+deploy-prod:
+  stage: deploy-prod
+  image: bitnami/kubectl:latest
+  environment:
+    name: production
+    url: https://nexacommerce.com
+  when: manual
+  script:
+    - kubectl config use-context nexacommerce-prod
+    - kubectl apply -k kubernetes/overlays/prod/
+    - kubectl rollout status deployment/auth-service -n nexacommerce-prod --timeout=300s
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/

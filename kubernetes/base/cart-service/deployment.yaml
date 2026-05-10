@@ -1,0 +1,186 @@
+# ============================================================
+# Cart Service — Base Kubernetes Manifests
+# Node.js service — Redis-backed shopping cart
+# ============================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cart-service
+  namespace: nexacommerce-prod
+  labels:
+    app: cart-service
+    version: v1
+    team: catalog
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/nexacommerce-prod-cart-service-role"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart-service
+  namespace: nexacommerce-prod
+  labels:
+    app: cart-service
+    version: v1
+    team: catalog
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cart-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: cart-service
+        version: v1
+        team: catalog
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "cart-service"
+    spec:
+      serviceAccountName: cart-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [cart-service]
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: cart-service
+          image: REGISTRY/nexacommerce/cart-service:IMAGE_TAG
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8083
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: PORT
+              value: "8083"
+            - name: NODE_ENV
+              value: "production"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: cart-service-config
+            - secretRef:
+                name: cart-service-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8083
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart-service
+  namespace: nexacommerce-prod
+  labels:
+    app: cart-service
+spec:
+  type: ClusterIP
+  selector:
+    app: cart-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8083
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cart-service
+  namespace: nexacommerce-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cart-service
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cart-service-pdb
+  namespace: nexacommerce-prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: cart-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cart-service-config
+  namespace: nexacommerce-prod
+data:
+  REDIS_TTL_CART: "604800"
+  REDIS_TTL_SESSION: "86400"
+  MAX_CART_ITEMS: "100"
+  PRODUCT_SERVICE_URL: "http://product-service"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  METRICS_PORT: "9090"

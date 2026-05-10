@@ -1,0 +1,82 @@
+# ============================================================
+# Staging Overlay — Kustomization
+# Production-like config with reduced scale
+# ============================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: nexacommerce-staging
+
+namespace: nexacommerce-staging
+
+bases:
+  - ../../base
+
+images:
+  - name: REGISTRY/nexacommerce/frontend
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/auth-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/product-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/cart-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/order-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/payment-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/inventory-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/search-service
+    newTag: "latest"
+  - name: REGISTRY/nexacommerce/notification-service
+    newTag: "latest"
+
+commonLabels:
+  environment: staging
+
+patches:
+  # Staging: 2 replicas per service (production-like but smaller)
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+  # Staging: slightly reduced resource limits
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "200m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "256Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+    target:
+      kind: Deployment
+  # Staging: PDB minAvailable = 1
+  - patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+    target:
+      kind: PodDisruptionBudget
+
+configMapGenerator:
+  - name: staging-environment-config
+    literals:
+      - ENVIRONMENT=staging
+      - LOG_LEVEL=debug
+      - TRACING_SAMPLE_RATE=1.0
+
+resources:
+  - istio/peer-authentication.yaml
+
+# Staging uses permissive mTLS (not strict) for easier debugging
